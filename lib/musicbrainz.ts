@@ -23,8 +23,13 @@ export type MBRelease = {
 // de "mais conhecido" — releases oficiais e correspondências exatas
 // pontuam mais alto que bootlegs, demos, etc).
 async function searchAlbumsRaw(query: string): Promise<MBRelease[]> {
+  // A MusicBrainz, sem prefixo de campo, só procura no título do álbum —
+  // por isso buscar só "Bad Bunny" (nome de artista) não achava nada.
+  // Aqui forçamos a busca em artista OU título do álbum.
+  const escaped = query.replace(/["\\]/g, "\\$&");
+  const luceneQuery = `artist:"${escaped}" OR releasegroup:"${escaped}"`;
   const url = `${MB_BASE}/release-group/?query=${encodeURIComponent(
-    query
+    luceneQuery
   )}&fmt=json&limit=12`;
 
   const res = await fetch(url, {
@@ -55,8 +60,10 @@ async function searchAlbumsRaw(query: string): Promise<MBRelease[]> {
 // mostrar o álbum na lista de resultados mesmo quando a pessoa digitou
 // o nome de uma música, não do disco.
 async function searchSongsRaw(query: string): Promise<MBRelease[]> {
+  const escaped = query.replace(/["\\]/g, "\\$&");
+  const luceneQuery = `artist:"${escaped}" OR recording:"${escaped}"`;
   const url = `${MB_BASE}/recording/?query=${encodeURIComponent(
-    query
+    luceneQuery
   )}&fmt=json&limit=15`;
 
   const res = await fetch(url, {
