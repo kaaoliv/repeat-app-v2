@@ -1,8 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { MBRelease } from "@/lib/musicbrainz";
+
+function formatDuration(totalSeconds: number | null) {
+  if (!totalSeconds) return null;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.round((totalSeconds % 3600) / 60);
+  if (hours > 0) return `${hours}h${minutes.toString().padStart(2, "0")}`;
+  return `${minutes} min`;
+}
+
+function formatTrackDuration(totalSeconds: number | null) {
+  if (!totalSeconds) return null;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
@@ -10,6 +25,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [loggingId, setLoggingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const fetchingDurations = useRef(new Set<string>());
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -20,11 +36,42 @@ export default function HomePage() {
     try {
       const res = await fetch(`/api/search-albums?q=${encodeURIComponent(query)}`);
       const data = await res.json();
-      setResults(data.results ?? []);
+      const items: MBRelease[] = data.results ?? [];
+      setResults(items);
+
+      // Álbuns que já vieram sem duração (não estavam no nosso cache)
+      // buscam a duração em segundo plano, um de cada vez, sem travar a
+      // lista — a MusicBrainz pede no máx. ~1 requisição/segundo.
+      const missing = items.filter((r) => !r.durationSeconds);
+      fetchDurationsSequentially(missing.map((r) => r.id));
     } catch {
       setFeedback("Erro ao buscar. Tenta de novo.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchDurationsSequentially(ids: string[]) {
+    for (const id of ids) {
+      if (fetchingDurations.current.has(id)) continue;
+      fetchingDurations.current.add(id);
+
+      try {
+        const res = await fetch(`/api/album-duration?id=${id}`);
+        const data = await res.json();
+        if (data.durationSeconds) {
+          setResults((prev) =>
+            prev.map((r) =>
+              r.id === id ? { ...r, durationSeconds: data.durationSeconds } : r
+            )
+          );
+        }
+      } catch {
+        // silencioso — a duração simplesmente não aparece pra esse item
+      }
+
+      // pequeno intervalo entre chamadas pra respeitar o rate limit da MusicBrainz
+      await new Promise((resolve) => setTimeout(resolve, 350));
     }
   }
 
@@ -75,7 +122,7 @@ export default function HomePage() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Busca um álbum ou artista..."
+          placeholder="Busca um álbum, artista ou música..."
           className="flex-1 bg-surface border border-white/10 rounded-lg px-4 py-2.5 outline-none focus:border-white/30 transition-colors"
         />
         <button
@@ -116,14 +163,29 @@ export default function HomePage() {
               <p className="text-sm text-accent/60 truncate">
                 {album.artistName} {album.year ? `· ${album.year}` : ""}
               </p>
+              {album.matchedTrack && (
+                <p className="text-xs text-accent/40 truncate mt-0.5">
+                  🎵 {album.matchedTrack.title}
+                  {album.matchedTrack.durationSeconds
+                    ? ` · ${formatTrackDuration(album.matchedTrack.durationSeconds)}`
+                    : ""}
+                </p>
+              )}
             </div>
-            <button
-              onClick={() => handleMarkAsHeard(album)}
-              disabled={loggingId === album.id}
-              className="text-sm bg-white/10 hover:bg-white/20 transition-colors rounded-md px-3 py-1.5 shrink-0 disabled:opacity-50"
-            >
-              {loggingId === album.id ? "..." : "Já ouvi"}
-            </button>
+            <div className="flex flex-col items-end gap-1.5 shrink-0">
+              {formatDuration(album.durationSeconds) && (
+                <span className="text-xs text-accent/40">
+                  {formatDuration(album.durationSeconds)}
+                </span>
+              )}
+              <button
+                onClick={() => handleMarkAsHeard(album)}
+                disabled={loggingId === album.id}
+                className="text-sm bg-white/10 hover:bg-white/20 transition-colors rounded-md px-3 py-1.5 disabled:opacity-50"
+              >
+                {loggingId === album.id ? "..." : "Já ouvi"}
+              </button>
+            </div>
           </li>
         ))}
       </ul>
