@@ -6,6 +6,30 @@ function formatDuration(totalSeconds: number) {
   return { hours, days };
 }
 
+// O contador de horas, no estilo dos odômetros mecânicos de toca-fitas:
+// cada dígito na sua própria janelinha, número fixo de casas.
+function OdometerDigits({ value, digits = 4 }: { value: number; digits?: number }) {
+  const padded = Math.min(value, 10 ** digits - 1)
+    .toString()
+    .padStart(digits, "0")
+    .split("");
+
+  return (
+    <div className="flex gap-1 justify-center">
+      {padded.map((digit, i) => (
+        <span
+          key={i}
+          className="w-11 h-16 sm:w-14 sm:h-20 bg-chassis border border-amber-dim/50 rounded-sm flex items-center justify-center shadow-[inset_0_2px_6px_rgba(0,0,0,0.6)]"
+        >
+          <span className="font-counter font-bold text-3xl sm:text-4xl text-amber tabular-nums">
+            {digit}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default async function ProfilePage() {
   const supabase = await createSupabaseServerClient();
 
@@ -16,12 +40,11 @@ export default async function ProfilePage() {
   if (!user) {
     return (
       <main className="max-w-2xl mx-auto px-4 py-12">
-        <p className="text-accent/70">Faça login pra ver seu perfil.</p>
+        <p className="text-paper-muted">Faça login pra ver seu perfil.</p>
       </main>
     );
   }
 
-  // Consulta a view user_total_listen_time (ver schema.sql)
   const { data: totals } = await supabase
     .from("user_total_listen_time")
     .select("total_seconds")
@@ -31,9 +54,6 @@ export default async function ProfilePage() {
   const totalSeconds = totals?.total_seconds ?? 0;
   const { hours, days } = formatDuration(totalSeconds);
 
-  // Últimas faixas ouvidas, com o álbum de cada uma (modelo novo, faixa a
-  // faixa). Agrupamos por álbum na hora de exibir, mostrando a faixa mais
-  // recente marcada em cada um.
   const { data: recentListens } = await supabase
     .from("track_listens")
     .select("listened_at, tracks(title, albums(title, cover_url, artists(name)))")
@@ -58,32 +78,36 @@ export default async function ProfilePage() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-12">
-      <section className="mb-10 bg-surface border border-white/10 rounded-xl p-8 text-center">
-        <p className="text-accent/60 text-sm mb-2">Você já gastou</p>
-        <p className="text-5xl font-semibold tracking-tight">{hours}h</p>
-        <p className="text-accent/60 text-sm mt-2">
-          {days > 0 ? `≈ ${days} dia(s) inteiro(s) de música` : "ouvindo música"}
+      <section className="mb-10 bg-panel border border-white/5 rounded-2xl p-8 sm:p-10">
+        <p className="text-paper-muted text-xs uppercase tracking-[0.2em] text-center mb-5">
+          Horas ouvidas
+        </p>
+        <OdometerDigits value={hours} />
+        <p className="text-paper-muted text-sm text-center mt-5">
+          {days > 0
+            ? `≈ ${days} dia${days === 1 ? "" : "s"} inteiro${days === 1 ? "" : "s"} da sua vida`
+            : "vai ouvindo que o contador gira"}
         </p>
       </section>
 
-      <h2 className="text-lg font-medium mb-4">Últimos ouvidos</h2>
-      <ul className="space-y-3">
+      <h2 className="font-display italic text-xl text-paper mb-4">Últimos ouvidos</h2>
+      <ul className="space-y-2">
         {recentAlbums.map((item, i) => (
           <li
             key={i}
-            className="flex items-center gap-4 bg-surface border border-white/10 rounded-lg p-3"
+            className="flex items-center gap-4 bg-panel border border-white/5 rounded-lg px-4 py-3"
           >
             <div className="flex-1 min-w-0">
-              <p className="font-medium truncate">{item.title}</p>
-              <p className="text-sm text-accent/60 truncate">{item.artistName}</p>
+              <p className="font-medium text-paper truncate">{item.title}</p>
+              <p className="text-sm text-paper-muted truncate">{item.artistName}</p>
             </div>
-            <span className="text-xs text-accent/40 shrink-0">
+            <span className="text-xs text-paper-muted/60 shrink-0 font-counter">
               {new Date(item.listened_at).toLocaleDateString("pt-BR")}
             </span>
           </li>
         ))}
         {recentAlbums.length === 0 && (
-          <p className="text-accent/50 text-sm">
+          <p className="text-paper-muted text-sm">
             Nenhum álbum marcado ainda. Vai na busca e marca o primeiro!
           </p>
         )}

@@ -113,8 +113,8 @@ export default function HomePage() {
   return (
     <main className="max-w-2xl mx-auto px-4 py-12">
       <header className="mb-10">
-        <h1 className="text-3xl font-semibold tracking-tight">Repeat</h1>
-        <p className="text-accent/60 mt-1">
+        <h1 className="font-display italic text-4xl text-paper tracking-tight">Repeat</h1>
+        <p className="text-paper-muted mt-2">
           Quanto tempo da sua vida você já gastou ouvindo música?
         </p>
       </header>
@@ -124,34 +124,34 @@ export default function HomePage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Busca um álbum, artista ou música..."
-          className="flex-1 bg-surface border border-white/10 rounded-lg px-4 py-2.5 outline-none focus:border-white/30 transition-colors"
+          className="flex-1 bg-panel border border-white/5 rounded-lg px-4 py-2.5 outline-none focus:border-amber-dim/60 transition-colors text-paper placeholder:text-paper-muted/60"
         />
         <button
           type="submit"
           disabled={loading}
-          className="bg-accent text-background rounded-lg px-5 py-2.5 font-medium disabled:opacity-50"
+          className="bg-amber text-chassis rounded-lg px-5 py-2.5 font-medium disabled:opacity-50 hover:brightness-110 transition-[filter]"
         >
           {loading ? "Buscando..." : "Buscar"}
         </button>
       </form>
 
       {feedback && (
-        <p className="text-sm mb-6 text-accent/80 bg-surface border border-white/10 rounded-lg px-4 py-2">
+        <p className="text-sm mb-6 text-paper-muted bg-panel border border-white/5 rounded-lg px-4 py-2">
           {feedback}
         </p>
       )}
 
-      <ul className="space-y-3">
+      <ul className="space-y-2">
         {results.map((album) => (
           <li
             key={album.id}
-            className="flex items-center gap-4 bg-surface border border-white/10 rounded-lg p-3"
+            className="flex items-center gap-4 bg-panel border border-white/5 rounded-lg p-3"
           >
             <Link
               href={`/album/${album.id}`}
               className="flex items-center gap-4 flex-1 min-w-0"
             >
-              <div className="relative w-14 h-14 shrink-0 rounded overflow-hidden bg-white/5">
+              <div className="relative w-14 h-14 shrink-0 rounded overflow-hidden bg-chassis">
                 <Image
                   src={album.coverUrl ?? "/placeholder-cover.png"}
                   alt={album.title}
@@ -164,12 +164,12 @@ export default function HomePage() {
                 />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-medium truncate">{album.title}</p>
-                <p className="text-sm text-accent/60 truncate">
+                <p className="font-medium text-paper truncate">{album.title}</p>
+                <p className="text-sm text-paper-muted truncate">
                   {album.artistName} {album.year ? `· ${album.year}` : ""}
                 </p>
                 {album.matchedTrack && (
-                  <p className="text-xs text-accent/40 truncate mt-0.5">
+                  <p className="text-xs text-paper-muted/70 truncate mt-0.5">
                     🎵 {album.matchedTrack.title}
                     {album.matchedTrack.durationSeconds
                       ? ` · ${formatTrackDuration(album.matchedTrack.durationSeconds)}`
@@ -180,14 +180,14 @@ export default function HomePage() {
             </Link>
             <div className="flex flex-col items-end gap-1.5 shrink-0">
               {formatDuration(album.durationSeconds) && (
-                <span className="text-xs text-accent/40">
+                <span className="text-xs text-paper-muted font-counter">
                   {formatDuration(album.durationSeconds)}
                 </span>
               )}
               <button
                 onClick={() => handleMarkAsHeard(album)}
                 disabled={loggingId === album.id}
-                className="text-sm bg-white/10 hover:bg-white/20 transition-colors rounded-md px-3 py-1.5 disabled:opacity-50"
+                className="text-sm bg-panel-raised border border-amber-dim/30 hover:border-amber-dim hover:text-amber transition-colors rounded-md px-3 py-1.5 disabled:opacity-50"
               >
                 {loggingId === album.id ? "..." : "Já ouvi"}
               </button>

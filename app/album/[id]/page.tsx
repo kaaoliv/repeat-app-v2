@@ -106,7 +106,7 @@ export default function AlbumPage({
   if (loading) {
     return (
       <main className="max-w-2xl mx-auto px-4 py-12">
-        <p className="text-accent/50">Carregando álbum...</p>
+        <p className="text-paper-muted">Carregando álbum...</p>
       </main>
     );
   }
@@ -114,8 +114,8 @@ export default function AlbumPage({
   if (error && !data) {
     return (
       <main className="max-w-2xl mx-auto px-4 py-12">
-        <p className="text-accent/70">{error}</p>
-        <Link href="/" className="text-accent/50 text-sm underline mt-4 inline-block">
+        <p className="text-paper-muted">{error}</p>
+        <Link href="/" className="text-paper-muted text-sm underline mt-4 inline-block">
           Voltar pra busca
         </Link>
       </main>
@@ -131,12 +131,12 @@ export default function AlbumPage({
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-12">
-      <Link href="/" className="text-accent/50 text-sm hover:text-accent/80">
+      <Link href="/" className="text-paper-muted text-sm hover:text-paper transition-colors">
         ← Voltar
       </Link>
 
       <div className="flex gap-5 mt-4 mb-6">
-        <div className="relative w-32 h-32 shrink-0 rounded-lg overflow-hidden bg-white/5">
+        <div className="relative w-32 h-32 shrink-0 rounded-lg overflow-hidden bg-chassis">
           <Image
             src={data.album.coverUrl}
             alt={data.album.title}
@@ -149,8 +149,10 @@ export default function AlbumPage({
           />
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-semibold leading-tight">{data.album.title}</h1>
-          <p className="text-accent/60 mt-1">
+          <h1 className="font-display italic text-2xl text-paper leading-tight">
+            {data.album.title}
+          </h1>
+          <p className="text-paper-muted mt-1">
             {data.album.artistName} {data.album.year ? `· ${data.album.year}` : ""}
           </p>
           {data.album.genres.length > 0 && (
@@ -158,7 +160,7 @@ export default function AlbumPage({
               {data.album.genres.map((g) => (
                 <span
                   key={g}
-                  className="text-xs bg-white/10 rounded-full px-2 py-0.5 text-accent/70"
+                  className="text-xs bg-panel-raised border border-amber-dim/30 rounded-full px-2 py-0.5 text-amber/90"
                 >
                   {g}
                 </span>
@@ -169,14 +171,14 @@ export default function AlbumPage({
       </div>
 
       {data.description && (
-        <p className="text-sm text-accent/60 leading-relaxed mb-6 bg-surface border border-white/10 rounded-lg p-4">
+        <p className="text-sm text-paper-muted leading-relaxed mb-6 bg-panel border border-white/5 rounded-lg p-4">
           {data.description.text}{" "}
           {data.description.wikipediaUrl && (
             <a
               href={data.description.wikipediaUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="underline text-accent/80"
+              className="underline text-amber/80 hover:text-amber"
             >
               Ver na Wikipédia
             </a>
@@ -185,14 +187,14 @@ export default function AlbumPage({
       )}
 
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-accent/60">
+        <p className="text-sm text-paper-muted font-counter">
           {heardCount}/{data.tracks.length} faixas ouvidas
           {heardSeconds > 0 && ` · ${formatTrackDuration(heardSeconds)}`}
         </p>
       </div>
 
       {error && (
-        <p className="text-sm mb-4 text-accent/80 bg-surface border border-white/10 rounded-lg px-4 py-2">
+        <p className="text-sm mb-4 text-paper-muted bg-panel border border-white/5 rounded-lg px-4 py-2">
           {error}
         </p>
       )}
@@ -203,24 +205,26 @@ export default function AlbumPage({
             <button
               onClick={() => toggleTrack(track)}
               disabled={togglingId === track.id || !track.id}
-              className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-white/5 transition-colors text-left disabled:opacity-50"
+              className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-panel transition-colors text-left disabled:opacity-50"
             >
               <span
-                className={`w-5 h-5 rounded shrink-0 border flex items-center justify-center transition-colors ${
+                className={`w-5 h-5 rounded-sm shrink-0 border flex items-center justify-center transition-colors ${
                   track.heard
-                    ? "bg-accent border-accent"
-                    : "border-white/20"
+                    ? "bg-amber border-amber"
+                    : "border-white/15"
                 }`}
               >
                 {track.heard && (
-                  <span className="text-background text-xs">✓</span>
+                  <span className="text-chassis text-xs font-bold">✓</span>
                 )}
               </span>
-              <span className="text-accent/40 text-sm w-5 shrink-0 tabular-nums">
+              <span className="text-paper-muted text-sm w-5 shrink-0 tabular-nums font-counter">
                 {track.trackNumber}
               </span>
-              <span className="flex-1 min-w-0 truncate">{track.title}</span>
-              <span className="text-accent/40 text-sm shrink-0 tabular-nums">
+              <span className={`flex-1 min-w-0 truncate ${track.heard ? "text-paper" : "text-paper/80"}`}>
+                {track.title}
+              </span>
+              <span className="text-paper-muted text-sm shrink-0 tabular-nums font-counter">
                 {formatTrackDuration(track.durationSeconds)}
               </span>
             </button>
