@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import type { MBRelease } from "@/lib/musicbrainz";
 
 function formatDuration(totalSeconds: number | null) {
@@ -146,32 +147,37 @@ export default function HomePage() {
             key={album.id}
             className="flex items-center gap-4 bg-surface border border-white/10 rounded-lg p-3"
           >
-            <div className="relative w-14 h-14 shrink-0 rounded overflow-hidden bg-white/5">
-              <Image
-                src={album.coverUrl ?? "/placeholder-cover.png"}
-                alt={album.title}
-                fill
-                sizes="56px"
-                className="object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                }}
-              />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-medium truncate">{album.title}</p>
-              <p className="text-sm text-accent/60 truncate">
-                {album.artistName} {album.year ? `· ${album.year}` : ""}
-              </p>
-              {album.matchedTrack && (
-                <p className="text-xs text-accent/40 truncate mt-0.5">
-                  🎵 {album.matchedTrack.title}
-                  {album.matchedTrack.durationSeconds
-                    ? ` · ${formatTrackDuration(album.matchedTrack.durationSeconds)}`
-                    : ""}
+            <Link
+              href={`/album/${album.id}`}
+              className="flex items-center gap-4 flex-1 min-w-0"
+            >
+              <div className="relative w-14 h-14 shrink-0 rounded overflow-hidden bg-white/5">
+                <Image
+                  src={album.coverUrl ?? "/placeholder-cover.png"}
+                  alt={album.title}
+                  fill
+                  sizes="56px"
+                  className="object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium truncate">{album.title}</p>
+                <p className="text-sm text-accent/60 truncate">
+                  {album.artistName} {album.year ? `· ${album.year}` : ""}
                 </p>
-              )}
-            </div>
+                {album.matchedTrack && (
+                  <p className="text-xs text-accent/40 truncate mt-0.5">
+                    🎵 {album.matchedTrack.title}
+                    {album.matchedTrack.durationSeconds
+                      ? ` · ${formatTrackDuration(album.matchedTrack.durationSeconds)}`
+                      : ""}
+                  </p>
+                )}
+              </div>
+            </Link>
             <div className="flex flex-col items-end gap-1.5 shrink-0">
               {formatDuration(album.durationSeconds) && (
                 <span className="text-xs text-accent/40">

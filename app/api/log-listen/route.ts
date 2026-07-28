@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
-import { getReleaseGroupDuration } from "@/lib/musicbrainz";
+import { ensureAlbumExists } from "@/lib/album-helpers";
+import { getAlbumTracklist } from "@/lib/musicbrainz";
 
+// Marca TODAS as faixas de um álbum como ouvidas de uma vez — é o botão
+// rápido "Já ouvi" na busca. Pra ajustar faixa por faixa, a pessoa vai na
+// tela do álbum (/album/[id]).
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
 
@@ -23,74 +27,74 @@ export async function POST(req: NextRequest) {
     year,
   } = body;
 
-  if (!musicbrainzReleaseGroupId || !title || !artistName) {
+  if (!musicbrainzReleaseGroupId) {
     return NextResponse.json(
-      { error: "Dados do álbum incompletos." },
+      { error: "musicbrainzReleaseGroupId é obrigatório." },
       { status: 400 }
     );
   }
 
-  // 1. Garante que o artista existe
-  let { data: artist } = await supabase
-    .from("artists")
-    .select("id")
-    .eq("musicbrainz_id", artistMusicbrainzId)
-    .maybeSingle();
-
-  if (!artist) {
-    const { data: newArtist, error: artistErr } = await supabase
-      .from("artists")
-      .insert({ name: artistName, musicbrainz_id: artistMusicbrainzId })
-      .select("id")
-      .single();
-
-    if (artistErr) {
-      return NextResponse.json({ error: artistErr.message }, { status: 500 });
-    }
-    artist = newArtist;
-  }
-
-  // 2. Garante que o álbum existe (busca duração na MusicBrainz na primeira vez)
-  let { data: album } = await supabase
-    .from("albums")
-    .select("id")
-    .eq("musicbrainz_id", musicbrainzReleaseGroupId)
-    .maybeSingle();
-
-  if (!album) {
-    const durationSeconds = await getReleaseGroupDuration(
-      musicbrainzReleaseGroupId
-    );
-
-    const { data: newAlbum, error: albumErr } = await supabase
-      .from("albums")
-      .insert({
-        artist_id: artist!.id,
-        title,
-        cover_url: coverUrl,
-        release_year: year ? Number(year) : null,
-        duration_seconds: durationSeconds,
-        musicbrainz_id: musicbrainzReleaseGroupId,
-      })
-      .select("id")
-      .single();
-
-    if (albumErr) {
-      return NextResponse.json({ error: albumErr.message }, { status: 500 });
-    }
-    album = newAlbum;
-  }
-
-  // 3. Registra o listen_log (cada chamada = +1 play_count nesse log do dia)
-  const { error: logErr } = await supabase.from("listen_logs").insert({
-    user_id: user.id,
-    album_id: album!.id,
-    play_count: 1,
+  const album = await ensureAlbumExists(supabase, {
+    musicbrainzReleaseGroupId,
+    title,
+    artistName,
+    artistMusicbrainzId,
+    coverUrl,
+    year,
   });
 
-  if (logErr) {
-    return NextResponse.json({ error: logErr.message }, { status: 500 });
+  if (!album) {
+    return NextResponse.json(
+      { error: "Erro ao salvar álbum." },
+      { status: 500 }
+    );
   }
 
-  return NextResponse.json({ success: true });
+  const mbTracks = await getAlbumTracklist(musicbrainzReleaseGroupId);
+
+  if (mbTracks.length === 0) {
+    return NextResponse.json(
+      { error: "Não encontramos as faixas desse álbum ainda." },
+      { status: 502 }
+    );
+  }
+
+  const totalSeconds = mbTracks.reduce(
+    (sum, t) => sum + (t.durationSeconds ?? 0),
+    0
+  );
+  await supabase
+    .from("albums")
+    .update({ duration_seconds: totalSeconds })
+    .eq("id", album.id);
+
+  const { data: dbTracks, error: tracksErr } = await supabase
+    .from("tracks")
+    .upsert(
+      mbTracks.map((t) => ({
+        album_id: album.id,
+        musicbrainz_recording_id: t.recordingId,
+        title: t.title,
+        duration_seconds: t.durationSeconds,
+        track_number: t.trackNumber,
+        disc_number: t.discNumber,
+      })),
+      { onConflict: "album_id,disc_number,track_number" }
+    )
+    .select("id");
+
+  if (tracksErr || !dbTracks) {
+    return NextResponse.json({ error: "Erro ao salvar faixas." }, { status: 500 });
+  }
+
+  const { error: listenErr } = await supabase.from("track_listens").upsert(
+    dbTracks.map((t) => ({ user_id: user.id, track_id: t.id })),
+    { onConflict: "user_id,track_id" }
+  );
+
+  if (listenErr) {
+    return NextResponse.json({ error: listenErr.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true, trackCount: dbTracks.length });
 }
