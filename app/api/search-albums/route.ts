@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { searchAlbumsAndSongs } from "@/lib/musicbrainz";
+import { searchAlbumsAndSongs, searchArtists } from "@/lib/musicbrainz";
 
 // Cliente simples (sem sessão de usuário) só pra ler dados públicos —
 // a tabela albums é de leitura pública (ver schema.sql), então a anon key
@@ -21,7 +21,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const results = await searchAlbumsAndSongs(q);
+    const [results, artists] = await Promise.all([
+      searchAlbumsAndSongs(q),
+      searchArtists(q).catch(() => []),
+    ]);
 
     // Preenche duração de álbum a partir do nosso cache (albums.duration_seconds),
     // pra quem já foi marcado como ouvido antes por alguém. Evita bater na
@@ -41,7 +44,7 @@ export async function GET(req: NextRequest) {
       durationSeconds: durationById.get(r.id) ?? null,
     }));
 
-    return NextResponse.json({ results: enriched });
+    return NextResponse.json({ results: enriched, artists });
   } catch (err) {
     console.error(err);
     return NextResponse.json(

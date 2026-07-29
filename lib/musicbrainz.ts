@@ -4,6 +4,84 @@
 const MB_BASE = "https://musicbrainz.org/ws/2";
 const USER_AGENT = "RepeatApp/0.1 (contato@garfado.com.br)";
 
+export type MBArtist = {
+  id: string;
+  name: string;
+  disambiguation: string | null;
+  score: number;
+};
+
+// Busca artistas por nome. Se a busca exata não achar nada (comum em
+// erros de digitação, tipo "madona" em vez de "Madonna"), tenta de novo
+// com busca fuzzy (tolera pequenas diferenças de grafia).
+export async function searchArtists(query: string): Promise<MBArtist[]> {
+  const tryFetch = async (q: string) => {
+    const url = `${MB_BASE}/artist/?query=${encodeURIComponent(q)}&fmt=json&limit=5`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.artists ?? []) as any[];
+  };
+
+  let raw = await tryFetch(query);
+
+  // Nada encontrado com a grafia exata — tenta busca aproximada (fuzzy).
+  if (raw.length === 0) {
+    const escaped = query.replace(/["\\]/g, "\\$&");
+    raw = await tryFetch(`${escaped}~`);
+  }
+
+  return raw
+    .filter((a) => Number(a.score ?? 0) >= 70) // corta resultados muito fracos
+    .map((a) => ({
+      id: a.id,
+      name: a.name,
+      disambiguation: a.disambiguation || null,
+      score: Number(a.score ?? 0),
+    }));
+}
+
+export type MBArtistAlbum = {
+  id: string;
+  title: string;
+  year: string | null;
+  coverUrl: string;
+  primaryType: string | null;
+};
+
+// Lista os álbuns de um artista (usado na tela de perfil do artista),
+// com os "Album" oficiais primeiro e depois o resto (EPs, ao vivo, etc),
+// ordenados por ano mais recente primeiro dentro de cada grupo.
+export async function getArtistAlbums(artistId: string): Promise<MBArtistAlbum[]> {
+  const url = `${MB_BASE}/release-group/?artist=${artistId}&fmt=json&limit=50`;
+
+  const res = await fetch(url, {
+    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+    next: { revalidate: 3600 },
+  });
+
+  if (!res.ok) return [];
+
+  const data = await res.json();
+  const albums: MBArtistAlbum[] = (data["release-groups"] ?? []).map((rg: any) => ({
+    id: rg.id,
+    title: rg.title,
+    year: rg["first-release-date"]?.slice(0, 4) || null,
+    coverUrl: `https://coverartarchive.org/release-group/${rg.id}/front-250`,
+    primaryType: rg["primary-type"] ?? null,
+  }));
+
+  return albums.sort((a, b) => {
+    const aIsAlbum = a.primaryType === "Album";
+    const bIsAlbum = b.primaryType === "Album";
+    if (aIsAlbum !== bIsAlbum) return aIsAlbum ? -1 : 1;
+    return (b.year ?? "0").localeCompare(a.year ?? "0");
+  });
+}
+
 export type MBRelease = {
   id: string;
   title: string;

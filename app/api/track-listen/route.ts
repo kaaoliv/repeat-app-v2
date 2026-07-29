@@ -12,36 +12,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
   }
 
-  const { trackId, heard } = await req.json();
+  const { trackId, action } = await req.json();
 
-  if (!trackId || typeof heard !== "boolean") {
+  if (!trackId || (action !== "increment" && action !== "decrement")) {
     return NextResponse.json(
-      { error: "trackId e heard são obrigatórios." },
+      { error: "trackId e action ('increment' | 'decrement') são obrigatórios." },
       { status: 400 }
     );
   }
 
-  if (heard) {
-    // upsert evita erro de duplicata se o usuário clicar duas vezes rápido
-    const { error } = await supabase
-      .from("track_listens")
-      .upsert(
-        { user_id: user.id, track_id: trackId },
-        { onConflict: "user_id,track_id" }
-      );
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-  } else {
-    const { error } = await supabase
-      .from("track_listens")
-      .delete()
-      .eq("user_id", user.id)
-      .eq("track_id", trackId);
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+  const fn = action === "increment" ? "increment_track_listen" : "decrement_track_listen";
+  const { data, error } = await supabase.rpc(fn, { p_track_id: trackId });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ success: true });
+  // Depois de zerar, a linha é apagada — a function retorna null nesse caso.
+  const playCount = data?.play_count ?? 0;
+
+  return NextResponse.json({ success: true, playCount });
 }

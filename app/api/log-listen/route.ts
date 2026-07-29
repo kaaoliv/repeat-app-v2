@@ -87,10 +87,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Erro ao salvar faixas." }, { status: 500 });
   }
 
-  const { error: listenErr } = await supabase.from("track_listens").upsert(
-    dbTracks.map((t) => ({ user_id: user.id, track_id: t.id })),
-    { onConflict: "user_id,track_id" }
-  );
+  const { error: listenErr } = await supabase.rpc("bulk_increment_album", {
+    p_album_id: album.id,
+  });
 
   if (listenErr) {
     return NextResponse.json({ error: listenErr.message }, { status: 500 });

@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import type { MBRelease } from "@/lib/musicbrainz";
+import { useRouter } from "next/navigation";
+import type { MBRelease, MBArtist } from "@/lib/musicbrainz";
 
 function formatDuration(totalSeconds: number | null) {
   if (!totalSeconds) return null;
@@ -21,8 +22,10 @@ function formatTrackDuration(totalSeconds: number | null) {
 }
 
 export default function HomePage() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MBRelease[]>([]);
+  const [artists, setArtists] = useState<MBArtist[]>([]);
   const [loading, setLoading] = useState(false);
   const [loggingId, setLoggingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -39,6 +42,7 @@ export default function HomePage() {
       const data = await res.json();
       const items: MBRelease[] = data.results ?? [];
       setResults(items);
+      setArtists(data.artists ?? []);
 
       // Álbuns que já vieram sem duração (não estavam no nosso cache)
       // buscam a duração em segundo plano, um de cada vez, sem travar a
@@ -141,15 +145,32 @@ export default function HomePage() {
         </p>
       )}
 
+      {artists.length > 0 && (
+        <div className="flex gap-3 mb-6 overflow-x-auto pb-1">
+          {artists.map((artist) => (
+            <Link
+              key={artist.id}
+              href={`/artist/${artist.id}`}
+              className="shrink-0 flex items-center gap-2 bg-panel border border-amber-dim/30 rounded-full pl-1.5 pr-4 py-1.5 hover:border-amber-dim transition-colors"
+            >
+              <span className="w-7 h-7 rounded-full bg-panel-raised flex items-center justify-center text-amber text-xs font-display italic">
+                {artist.name.charAt(0).toUpperCase()}
+              </span>
+              <span className="text-sm text-paper">{artist.name}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+
       <ul className="space-y-2">
         {results.map((album) => (
           <li
             key={album.id}
             className="flex items-center gap-4 bg-panel border border-white/5 rounded-lg p-3"
           >
-            <Link
-              href={`/album/${album.id}`}
-              className="flex items-center gap-4 flex-1 min-w-0"
+            <div
+              onClick={() => router.push(`/album/${album.id}`)}
+              className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer"
             >
               <div className="relative w-14 h-14 shrink-0 rounded overflow-hidden bg-chassis">
                 <Image
@@ -166,7 +187,18 @@ export default function HomePage() {
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-paper truncate">{album.title}</p>
                 <p className="text-sm text-paper-muted truncate">
-                  {album.artistName} {album.year ? `· ${album.year}` : ""}
+                  {album.artistId ? (
+                    <Link
+                      href={`/artist/${album.artistId}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="hover:text-amber hover:underline"
+                    >
+                      {album.artistName}
+                    </Link>
+                  ) : (
+                    album.artistName
+                  )}{" "}
+                  {album.year ? `· ${album.year}` : ""}
                 </p>
                 {album.matchedTrack && (
                   <p className="text-xs text-paper-muted/70 truncate mt-0.5">
@@ -177,7 +209,7 @@ export default function HomePage() {
                   </p>
                 )}
               </div>
-            </Link>
+            </div>
             <div className="flex flex-col items-end gap-1.5 shrink-0">
               {formatDuration(album.durationSeconds) && (
                 <span className="text-xs text-paper-muted font-counter">

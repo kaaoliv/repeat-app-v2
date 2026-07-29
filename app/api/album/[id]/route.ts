@@ -88,18 +88,20 @@ export async function GET(
     dbTracks = upserted ?? [];
   }
 
-  // Quais faixas esse usuário já marcou como ouvidas.
-  let heardTrackIds = new Set<string>();
+  // Quantas vezes esse usuário já ouviu cada faixa.
+  let playCountByTrackId = new Map<string, number>();
   if (user && dbTracks.length > 0) {
     const { data: listens } = await supabase
       .from("track_listens")
-      .select("track_id")
+      .select("track_id, play_count")
       .eq("user_id", user.id)
       .in(
         "track_id",
         dbTracks.map((t) => t.id)
       );
-    heardTrackIds = new Set((listens ?? []).map((l) => l.track_id));
+    playCountByTrackId = new Map(
+      (listens ?? []).map((l) => [l.track_id, l.play_count])
+    );
   }
 
   const dbTrackByRecordingId = new Map(
@@ -114,7 +116,7 @@ export async function GET(
       durationSeconds: t.durationSeconds,
       trackNumber: t.trackNumber,
       discNumber: t.discNumber,
-      heard: dbId ? heardTrackIds.has(dbId) : false,
+      playCount: dbId ? playCountByTrackId.get(dbId) ?? 0 : 0,
     };
   });
 
@@ -122,6 +124,7 @@ export async function GET(
     album: {
       title: basicInfo.title,
       artistName: basicInfo.artistName,
+      artistId: basicInfo.artistId,
       coverUrl: basicInfo.coverUrl,
       year: basicInfo.year,
       genres,
