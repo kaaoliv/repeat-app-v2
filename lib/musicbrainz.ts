@@ -4,6 +4,22 @@
 const MB_BASE = "https://musicbrainz.org/ws/2";
 const USER_AGENT = "RepeatApp/0.1 (contato@garfado.com.br)";
 
+// A MusicBrainz limita a ~1 requisição/segundo sem chave de API. Em picos
+// de uso (várias buscas em sequência), é comum levar um 429/503 — esse
+// helper tenta de novo automaticamente antes de desistir.
+export async function mbFetch(url: string, revalidate = 60): Promise<Response | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+      next: { revalidate },
+    });
+    if (res.ok) return res;
+    if (res.status !== 429 && res.status !== 503) return res; // erro real, não adianta repetir
+    await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+  }
+  return null;
+}
+
 export type MBArtist = {
   id: string;
   name: string;
@@ -17,11 +33,8 @@ export type MBArtist = {
 export async function searchArtists(query: string): Promise<MBArtist[]> {
   const tryFetch = async (q: string) => {
     const url = `${MB_BASE}/artist/?query=${encodeURIComponent(q)}&fmt=json&limit=5`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-      next: { revalidate: 60 },
-    });
-    if (!res.ok) return [];
+    const res = await mbFetch(url);
+    if (!res || !res.ok) return [];
     const data = await res.json();
     return (data.artists ?? []) as any[];
   };
@@ -58,12 +71,8 @@ export type MBArtistAlbum = {
 export async function getArtistAlbums(artistId: string): Promise<MBArtistAlbum[]> {
   const url = `${MB_BASE}/release-group/?artist=${artistId}&fmt=json&limit=50`;
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    next: { revalidate: 3600 },
-  });
-
-  if (!res.ok) return [];
+  const res = await mbFetch(url, 3600);
+  if (!res || !res.ok) return [];
 
   const data = await res.json();
   const albums: MBArtistAlbum[] = (data["release-groups"] ?? []).map((rg: any) => ({
@@ -110,12 +119,8 @@ async function searchAlbumsRaw(query: string): Promise<MBRelease[]> {
     luceneQuery
   )}&fmt=json&limit=12`;
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    next: { revalidate: 60 },
-  });
-
-  if (!res.ok) throw new Error(`MusicBrainz respondeu ${res.status}`);
+  const res = await mbFetch(url);
+  if (!res || !res.ok) return [];
 
   const data = await res.json();
 
@@ -144,12 +149,8 @@ async function searchSongsRaw(query: string): Promise<MBRelease[]> {
     luceneQuery
   )}&fmt=json&limit=15`;
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    next: { revalidate: 60 },
-  });
-
-  if (!res.ok) throw new Error(`MusicBrainz respondeu ${res.status}`);
+  const res = await mbFetch(url);
+  if (!res || !res.ok) return [];
 
   const data = await res.json();
 
@@ -225,12 +226,8 @@ export async function getAlbumBasicInfo(
 ): Promise<MBAlbumBasicInfo | null> {
   const url = `${MB_BASE}/release-group/${releaseGroupId}?inc=artist-credits&fmt=json`;
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    next: { revalidate: 3600 },
-  });
-
-  if (!res.ok) return null;
+  const res = await mbFetch(url, 3600);
+  if (!res || !res.ok) return null;
 
   const rg = await res.json();
 
@@ -259,12 +256,8 @@ export async function getAlbumTracklist(
 ): Promise<MBTrack[]> {
   const url = `${MB_BASE}/release?release-group=${releaseGroupId}&fmt=json&limit=1&inc=recordings`;
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    next: { revalidate: 3600 },
-  });
-
-  if (!res.ok) return [];
+  const res = await mbFetch(url, 3600);
+  if (!res || !res.ok) return [];
 
   const data = await res.json();
   const release = data.releases?.[0];
@@ -293,12 +286,8 @@ export async function getAlbumTracklist(
 export async function getAlbumGenres(releaseGroupId: string): Promise<string[]> {
   const url = `${MB_BASE}/release-group/${releaseGroupId}?inc=genres&fmt=json`;
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    next: { revalidate: 3600 },
-  });
-
-  if (!res.ok) return [];
+  const res = await mbFetch(url, 3600);
+  if (!res || !res.ok) return [];
 
   const data = await res.json();
   const genres = (data.genres ?? []) as { name: string; count: number }[];
@@ -309,26 +298,27 @@ export async function getAlbumGenres(releaseGroupId: string): Promise<string[]> 
     .map((g) => g.name);
 }
 
-export type ArtistDescription = { text: string; wikipediaUrl: string };
+export type ArtistDescription = {
+  text: string;
+  wikipediaUrl: string;
+  imageUrl: string | null;
+};
 
 // Busca uma descrição curta do artista via Wikipedia, seguindo a cadeia
-// MusicBrainz (relação "wikidata") → Wikidata (sitelink da Wikipédia) →
-// Wikipedia (resumo). Retorna null se qualquer passo não encontrar nada
-// (nem todo artista tem página).
+// MusicBrainz (relação "wikidata") → Wikidata (sitelink da Wikipédia +
+// foto, se tiver) → Wikipedia (resumo). Retorna null se qualquer passo
+// não encontrar nada (nem todo artista tem página).
 export async function getArtistDescription(
   artistMusicbrainzId: string
 ): Promise<ArtistDescription | null> {
   if (!artistMusicbrainzId) return null;
 
   try {
-    const artistRes = await fetch(
+    const artistRes = await mbFetch(
       `${MB_BASE}/artist/${artistMusicbrainzId}?inc=url-rels&fmt=json`,
-      {
-        headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-        next: { revalidate: 86400 },
-      }
+      86400
     );
-    if (!artistRes.ok) return null;
+    if (!artistRes || !artistRes.ok) return null;
     const artistData = await artistRes.json();
 
     const wikidataRel = (artistData.relations ?? []).find(
@@ -345,10 +335,24 @@ export async function getArtistDescription(
     );
     if (!wikidataRes.ok) return null;
     const wikidataData = await wikidataRes.json();
-    const sitelinks = wikidataData.entities?.[qid]?.sitelinks;
+    const entity = wikidataData.entities?.[qid];
+    const sitelinks = entity?.sitelinks;
+
+    // P18 = propriedade "imagem" na Wikidata, aponta pro nome do arquivo
+    // no Wikimedia Commons.
+    const imageFilename =
+      entity?.claims?.P18?.[0]?.mainsnak?.datavalue?.value ?? null;
+    const imageUrl = imageFilename
+      ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(
+          imageFilename
+        )}?width=400`
+      : null;
 
     const site = sitelinks?.ptwiki ?? sitelinks?.enwiki;
-    if (!site) return null;
+    if (!site) {
+      // Sem página de texto, mas pode ser que tenha foto mesmo assim.
+      return imageUrl ? { text: "", wikipediaUrl: "", imageUrl } : null;
+    }
 
     const lang = sitelinks?.ptwiki ? "pt" : "en";
     const summaryRes = await fetch(
@@ -357,14 +361,13 @@ export async function getArtistDescription(
       )}`,
       { headers: { Accept: "application/json" }, next: { revalidate: 86400 } }
     );
-    if (!summaryRes.ok) return null;
+    if (!summaryRes.ok) return imageUrl ? { text: "", wikipediaUrl: "", imageUrl } : null;
     const summaryData = await summaryRes.json();
 
-    if (!summaryData.extract) return null;
-
     return {
-      text: summaryData.extract,
+      text: summaryData.extract ?? "",
       wikipediaUrl: summaryData.content_urls?.desktop?.page ?? "",
+      imageUrl: imageUrl ?? summaryData.thumbnail?.source ?? null,
     };
   } catch {
     return null;
@@ -379,12 +382,8 @@ export async function getReleaseGroupDuration(
 ): Promise<number | null> {
   const searchUrl = `${MB_BASE}/release?release-group=${releaseGroupId}&fmt=json&limit=1&inc=recordings`;
 
-  const res = await fetch(searchUrl, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    next: { revalidate: 3600 },
-  });
-
-  if (!res.ok) return null;
+  const res = await mbFetch(searchUrl, 3600);
+  if (!res || !res.ok) return null;
 
   const data = await res.json();
   const release = data.releases?.[0];

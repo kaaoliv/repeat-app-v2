@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getArtistAlbums, getArtistDescription } from "@/lib/musicbrainz";
+import { getArtistAlbums, getArtistDescription, mbFetch } from "@/lib/musicbrainz";
 
 const MB_BASE = "https://musicbrainz.org/ws/2";
-const USER_AGENT = "RepeatApp/0.1 (contato@garfado.com.br)";
 
 export async function GET(
   req: NextRequest,
@@ -10,13 +9,16 @@ export async function GET(
 ) {
   const { id: artistId } = await params;
 
-  const artistRes = await fetch(`${MB_BASE}/artist/${artistId}?fmt=json`, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    next: { revalidate: 3600 },
-  });
+  const artistRes = await mbFetch(`${MB_BASE}/artist/${artistId}?fmt=json`, 3600);
 
-  if (!artistRes.ok) {
-    return NextResponse.json({ error: "Artista não encontrado." }, { status: 404 });
+  if (!artistRes || !artistRes.ok) {
+    return NextResponse.json(
+      {
+        error:
+          "Artista não encontrado (ou a MusicBrainz está sobrecarregada — tenta de novo em alguns segundos).",
+      },
+      { status: 404 }
+    );
   }
 
   const artist = await artistRes.json();

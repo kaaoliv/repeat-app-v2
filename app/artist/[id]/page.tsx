@@ -6,7 +6,7 @@ import Link from "next/link";
 
 type ArtistData = {
   artist: { id: string; name: string };
-  description: { text: string; wikipediaUrl: string } | null;
+  description: { text: string; wikipediaUrl: string; imageUrl: string | null } | null;
   albums: {
     id: string;
     title: string;
@@ -62,11 +62,27 @@ export default function ArtistPage({
         ← Voltar
       </Link>
 
-      <h1 className="font-display italic text-3xl text-paper mt-4 mb-2">
-        {data.artist.name}
-      </h1>
+      <div className="flex items-center gap-4 mt-4 mb-2">
+        {data.description?.imageUrl && (
+          <div className="relative w-20 h-20 shrink-0 rounded-full overflow-hidden bg-panel border border-white/5">
+            <Image
+              src={data.description.imageUrl}
+              alt={data.artist.name}
+              fill
+              sizes="80px"
+              className="object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          </div>
+        )}
+        <h1 className="font-display italic text-3xl text-paper">
+          {data.artist.name}
+        </h1>
+      </div>
 
-      {data.description && (
+      {data.description?.text && (
         <p className="text-sm text-paper-muted leading-relaxed mb-8 bg-panel border border-white/5 rounded-lg p-4">
           {data.description.text}{" "}
           {data.description.wikipediaUrl && (

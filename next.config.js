@@ -6,6 +6,14 @@ const nextConfig = {
         protocol: "https",
         hostname: "coverartarchive.org",
       },
+      {
+        protocol: "https",
+        hostname: "commons.wikimedia.org",
+      },
+      {
+        protocol: "https",
+        hostname: "upload.wikimedia.org",
+      },
     ],
   },
 };
