@@ -1,6 +1,6 @@
-import Image from "next/image";
 import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import AlbumCover from "../components/AlbumCover";
 
 export const dynamic = "force-dynamic";
 
@@ -128,20 +128,12 @@ export default async function LibraryPage({
               href={`/album/${album.musicbrainzId}`}
               className="flex items-center gap-4 bg-panel border border-white/5 rounded-lg p-3 hover:border-amber-dim/30 transition-colors"
             >
-              <div className="relative w-14 h-14 shrink-0 rounded overflow-hidden bg-chassis">
-                {album.coverUrl && (
-                  <Image
-                    src={album.coverUrl}
-                    alt={album.title}
-                    fill
-                    sizes="56px"
-                    className="object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                  />
-                )}
-              </div>
+              <AlbumCover
+                src={album.coverUrl}
+                alt={album.title}
+                className="w-14 h-14 shrink-0 rounded"
+                sizes="56px"
+              />
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-paper truncate">{album.title}</p>
                 <p className="text-sm text-paper-muted truncate">{album.artistName}</p>

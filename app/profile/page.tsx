@@ -1,7 +1,7 @@
-import Image from "next/image";
 import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import UsernameEditor from "../components/UsernameEditor";
+import AlbumCover from "../components/AlbumCover";
 
 // Sem isso, o Next.js pode reaproveitar uma versão em cache dessa página
 // entre navegações rápidas (ex: marcar uma faixa e ir direto pro perfil),
@@ -203,20 +203,12 @@ export default async function ProfilePage() {
             key={i}
             className="flex items-center gap-4 bg-panel border border-white/5 rounded-lg px-4 py-3"
           >
-            <div className="relative w-11 h-11 shrink-0 rounded overflow-hidden bg-chassis">
-              {item.coverUrl && (
-                <Image
-                  src={item.coverUrl}
-                  alt={item.title}
-                  fill
-                  sizes="44px"
-                  className="object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                  }}
-                />
-              )}
-            </div>
+            <AlbumCover
+              src={item.coverUrl}
+              alt={item.title}
+              className="w-11 h-11 shrink-0 rounded"
+              sizes="44px"
+            />
             <div className="flex-1 min-w-0">
               <p className="font-medium text-paper truncate">{item.title}</p>
               <p className="text-sm text-paper-muted truncate">{item.artistName}</p>
