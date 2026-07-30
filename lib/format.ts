@@ -38,6 +38,20 @@ export function formatTrackDuration(totalSeconds: number | null | undefined): st
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+// Data de escuta amigável: "hoje", "ontem", "3d", ou "12/03"
+export function formatListenDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86400000);
+  if (diffDays <= 0) return "hoje";
+  if (diffDays === 1) return "ontem";
+  if (diffDays < 7) return `${diffDays}d`;
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
 // Duração de álbum média: "42 min", "1h12"
 export function formatAlbumDuration(totalSeconds: number | null | undefined): string | null {
   if (!totalSeconds) return null;
