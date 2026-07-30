@@ -3,6 +3,7 @@
 import { useEffect, useState, use as usePromise } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import AlbumCard from "@/app/components/AlbumCard";
 
 type ArtistData = {
   artist: { id: string; name: string };
@@ -16,6 +17,8 @@ type ArtistData = {
   }[];
 };
 
+const accents = ["primary", "blue", "coral", "teal", "pink", "gold"] as const;
+
 export default function ArtistPage({
   params,
 }: {
@@ -25,6 +28,7 @@ export default function ArtistPage({
   const [data, setData] = useState<ArtistData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => {
     fetch(`/api/artist/${id}`)
@@ -39,58 +43,77 @@ export default function ArtistPage({
 
   if (loading) {
     return (
-      <main className="max-w-2xl mx-auto px-4 py-12">
-        <p className="text-paper-muted">Carregando artista...</p>
+      <main className="px-4 pt-9">
+        <div className="flex items-center gap-4">
+          <div className="h-24 w-24 shrink-0 animate-pulse rounded-full bg-surface-2" />
+          <div className="h-8 w-40 animate-pulse rounded bg-surface-2" />
+        </div>
+        <p className="mt-8 text-sm text-ink-muted">Carregando artista...</p>
       </main>
     );
   }
 
   if (error || !data) {
     return (
-      <main className="max-w-2xl mx-auto px-4 py-12">
-        <p className="text-paper-muted">{error ?? "Artista não encontrado."}</p>
-        <Link href="/" className="text-paper-muted text-sm underline mt-4 inline-block">
+      <main className="px-4 pt-9">
+        <p className="text-ink-muted">{error ?? "Artista não encontrado."}</p>
+        <Link href="/" className="mt-4 inline-block text-sm text-primary-soft underline">
           Voltar pra busca
         </Link>
       </main>
     );
   }
 
+  const showPhoto = data.description?.imageUrl && !imgFailed;
+
   return (
-    <main className="max-w-2xl mx-auto px-4 py-12">
-      <Link href="/" className="text-paper-muted text-sm hover:text-paper transition-colors">
-        ← Voltar
+    <main className="px-4 pt-8">
+      <Link
+        href="/"
+        className="mb-4 inline-flex items-center gap-1 text-sm text-ink-muted transition-colors hover:text-ink"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+        Voltar
       </Link>
 
-      <div className="flex items-center gap-4 mt-4 mb-2">
-        {data.description?.imageUrl && (
-          <div className="relative w-20 h-20 shrink-0 rounded-full overflow-hidden bg-panel border border-white/5">
+      <div className="flex items-center gap-4">
+        <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full ring-2 ring-primary/40">
+          {showPhoto ? (
             <Image
-              src={data.description.imageUrl}
+              src={data.description!.imageUrl as string}
               alt={data.artist.name}
               fill
-              sizes="80px"
+              sizes="96px"
               className="object-cover"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
+              onError={() => setImgFailed(true)}
             />
-          </div>
-        )}
-        <h1 className="font-display italic text-3xl text-paper">
-          {data.artist.name}
-        </h1>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary to-blue font-display text-3xl font-extrabold text-white">
+              {data.artist.name.charAt(0).toUpperCase()}
+            </div>
+          )}
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-balance font-display text-2xl font-extrabold leading-tight text-ink">
+            {data.artist.name}
+          </h1>
+          <p className="mt-0.5 text-sm text-ink-muted">
+            {data.albums.length} {data.albums.length === 1 ? "álbum" : "álbuns"}
+          </p>
+        </div>
       </div>
 
       {data.description?.text && (
-        <p className="text-sm text-paper-muted leading-relaxed mb-8 bg-panel border border-white/5 rounded-lg p-4">
+        <p className="mt-5 rounded-xl border border-line bg-surface p-4 text-sm leading-relaxed text-ink-muted">
           {data.description.text}{" "}
           {data.description.wikipediaUrl && (
             <a
               href={data.description.wikipediaUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="underline text-amber/80 hover:text-amber"
+              className="text-primary-soft underline hover:text-primary"
             >
               Ver na Wikipédia
             </a>
@@ -98,44 +121,34 @@ export default function ArtistPage({
         </p>
       )}
 
-      <h2 className="text-sm uppercase tracking-[0.15em] text-paper-muted mb-4">
-        Álbuns
+      <h2 className="mb-3 mt-7 px-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink-faint">
+        Discografia
       </h2>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        {data.albums.map((album) => (
-          <Link
-            key={album.id}
-            href={`/album/${album.id}`}
-            className="group"
-          >
-            <div className="relative aspect-square rounded-lg overflow-hidden bg-chassis border border-white/5 mb-2">
-              <Image
-                src={album.coverUrl}
-                alt={album.title}
-                fill
-                sizes="200px"
-                className="object-cover group-hover:brightness-110 transition-[filter]"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                }}
-              />
-            </div>
-            <p className="text-sm font-medium text-paper truncate">{album.title}</p>
-            <p className="text-xs text-paper-muted font-counter">
-              {album.year ?? "—"}
-              {album.primaryType && album.primaryType !== "Album"
-                ? ` · ${album.primaryType}`
-                : ""}
-            </p>
-          </Link>
-        ))}
-        {data.albums.length === 0 && (
-          <p className="text-paper-muted text-sm col-span-full">
-            Não encontramos álbuns catalogados pra esse artista.
-          </p>
-        )}
-      </div>
+      {data.albums.length === 0 ? (
+        <p className="px-1 text-sm text-ink-muted">
+          Não encontramos álbuns catalogados pra esse artista.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3">
+          {data.albums.map((album, i) => (
+            <AlbumCard
+              key={album.id}
+              href={`/album/${album.id}`}
+              title={album.title}
+              subtitle={
+                album.year
+                  ? album.primaryType && album.primaryType !== "Album"
+                    ? `${album.year} · ${album.primaryType}`
+                    : album.year
+                  : album.primaryType ?? undefined
+              }
+              coverUrl={album.coverUrl}
+              accent={accents[i % accents.length]}
+            />
+          ))}
+        </div>
+      )}
     </main>
   );
 }
