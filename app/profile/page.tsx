@@ -1,9 +1,46 @@
+import Image from "next/image";
+import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
+import UsernameEditor from "../components/UsernameEditor";
+
+// Sem isso, o Next.js pode reaproveitar uma versão em cache dessa página
+// entre navegações rápidas (ex: marcar uma faixa e ir direto pro perfil),
+// mostrando o total de horas desatualizado por alguns segundos.
+export const dynamic = "force-dynamic";
 
 function formatDuration(totalSeconds: number) {
   const hours = Math.floor(totalSeconds / 3600);
   const days = Math.floor(hours / 24);
   return { hours, days };
+}
+
+// Calcula quantos dias seguidos (contando hoje ou ontem como início) a
+// pessoa tem pelo menos uma escuta registrada.
+function calculateStreak(listenDates: string[]): number {
+  const uniqueDays = Array.from(
+    new Set(listenDates.map((d) => new Date(d).toISOString().slice(0, 10)))
+  ).sort((a, b) => (a < b ? 1 : -1)); // mais recente primeiro
+
+  if (uniqueDays.length === 0) return 0;
+
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+  // Se não ouviu nem hoje nem ontem, a sequência já quebrou.
+  if (uniqueDays[0] !== todayStr && uniqueDays[0] !== yesterdayStr) return 0;
+
+  let streak = 1;
+  for (let i = 0; i < uniqueDays.length - 1; i++) {
+    const current = new Date(uniqueDays[i]);
+    const next = new Date(uniqueDays[i + 1]);
+    const diffDays = Math.round((current.getTime() - next.getTime()) / 86400000);
+    if (diffDays === 1) streak++;
+    else break;
+  }
+  return streak;
 }
 
 // O contador de horas, no estilo dos odômetros mecânicos de toca-fitas:
@@ -51,6 +88,22 @@ export default async function ProfilePage() {
     .eq("user_id", user.id)
     .maybeSingle();
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("username")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const { count: followerCount } = await supabase
+    .from("follows")
+    .select("*", { count: "exact", head: true })
+    .eq("following_id", user.id);
+
+  const { count: followingCount } = await supabase
+    .from("follows")
+    .select("*", { count: "exact", head: true })
+    .eq("follower_id", user.id);
+
   const totalSeconds = totals?.total_seconds ?? 0;
   const { hours, days } = formatDuration(totalSeconds);
 
@@ -72,13 +125,34 @@ export default async function ProfilePage() {
       listened_at: listen.listened_at,
       title: albumTitle,
       artistName: track?.albums?.artists?.name,
+      coverUrl: track?.albums?.cover_url,
     });
     if (recentAlbums.length >= 10) break;
   }
 
+  const { data: allListenDates } = await supabase
+    .from("track_listens")
+    .select("listened_at")
+    .eq("user_id", user.id);
+
+  const streak = calculateStreak((allListenDates ?? []).map((d) => d.listened_at));
+
   return (
     <main className="max-w-2xl mx-auto px-4 py-12">
-      <section className="mb-10 bg-panel border border-white/5 rounded-2xl p-8 sm:p-10">
+      <div className="flex items-center justify-between mb-6">
+        <UsernameEditor currentUsername={profile?.username ?? null} />
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-paper-muted font-counter">
+            <span className="text-paper">{followerCount ?? 0}</span> seguidores ·{" "}
+            <span className="text-paper">{followingCount ?? 0}</span> seguindo
+          </span>
+          <Link href="/people" className="text-sm text-paper-muted hover:text-paper transition-colors">
+            Buscar pessoas
+          </Link>
+        </div>
+      </div>
+
+      <section className="mb-6 bg-panel border border-white/5 rounded-2xl p-8 sm:p-10">
         <p className="text-paper-muted text-xs uppercase tracking-[0.2em] text-center mb-5">
           Horas ouvidas
         </p>
@@ -88,7 +162,39 @@ export default async function ProfilePage() {
             ? `≈ ${days} dia${days === 1 ? "" : "s"} inteiro${days === 1 ? "" : "s"} da sua vida`
             : "vai ouvindo que o contador gira"}
         </p>
+        {streak > 0 && (
+          <p className="text-amber text-sm text-center mt-3 font-counter">
+            🔥 {streak} dia{streak === 1 ? "" : "s"} seguido{streak === 1 ? "" : "s"} ouvindo
+          </p>
+        )}
       </section>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-10">
+        <Link
+          href="/library"
+          className="bg-panel border border-white/5 rounded-lg px-3 py-4 text-center hover:border-amber-dim/40 transition-colors"
+        >
+          <p className="text-sm text-paper">Biblioteca</p>
+        </Link>
+        <Link
+          href="/stats"
+          className="bg-panel border border-white/5 rounded-lg px-3 py-4 text-center hover:border-amber-dim/40 transition-colors"
+        >
+          <p className="text-sm text-paper">Estatísticas</p>
+        </Link>
+        <Link
+          href="/watchlist"
+          className="bg-panel border border-white/5 rounded-lg px-3 py-4 text-center hover:border-amber-dim/40 transition-colors"
+        >
+          <p className="text-sm text-paper">Quero ouvir</p>
+        </Link>
+        <Link
+          href="/lists"
+          className="bg-panel border border-white/5 rounded-lg px-3 py-4 text-center hover:border-amber-dim/40 transition-colors"
+        >
+          <p className="text-sm text-paper">Minhas listas</p>
+        </Link>
+      </div>
 
       <h2 className="font-display italic text-xl text-paper mb-4">Últimos ouvidos</h2>
       <ul className="space-y-2">
@@ -97,6 +203,20 @@ export default async function ProfilePage() {
             key={i}
             className="flex items-center gap-4 bg-panel border border-white/5 rounded-lg px-4 py-3"
           >
+            <div className="relative w-11 h-11 shrink-0 rounded overflow-hidden bg-chassis">
+              {item.coverUrl && (
+                <Image
+                  src={item.coverUrl}
+                  alt={item.title}
+                  fill
+                  sizes="44px"
+                  className="object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
+                />
+              )}
+            </div>
             <div className="flex-1 min-w-0">
               <p className="font-medium text-paper truncate">{item.title}</p>
               <p className="text-sm text-paper-muted truncate">{item.artistName}</p>

@@ -55,16 +55,16 @@ export async function GET(
     );
   }
 
-  // Sincroniza a duração total do álbum (soma das faixas) se ainda não tiver.
+  // Sincroniza duração e gêneros do álbum se ainda não tiver.
   const totalSeconds = mbTracks.reduce(
     (sum, t) => sum + (t.durationSeconds ?? 0),
     0
   );
-  if (totalSeconds > 0) {
-    await supabase
-      .from("albums")
-      .update({ duration_seconds: totalSeconds })
-      .eq("id", album.id);
+  const updates: Record<string, unknown> = {};
+  if (totalSeconds > 0) updates.duration_seconds = totalSeconds;
+  if (genres.length > 0) updates.genres = genres;
+  if (Object.keys(updates).length > 0) {
+    await supabase.from("albums").update(updates).eq("id", album.id);
   }
 
   // Upsert das faixas (on conflict faz nada demais além de garantir que
@@ -120,6 +120,17 @@ export async function GET(
     };
   });
 
+  let inWatchlist = false;
+  if (user) {
+    const { data: wl } = await supabase
+      .from("watchlist")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("album_id", album.id)
+      .maybeSingle();
+    inWatchlist = !!wl;
+  }
+
   return NextResponse.json({
     album: {
       title: basicInfo.title,
@@ -133,5 +144,6 @@ export async function GET(
     description,
     tracks,
     isLoggedIn: !!user,
+    inWatchlist,
   });
 }

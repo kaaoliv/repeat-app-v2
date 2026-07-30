@@ -3,6 +3,7 @@
 import { useEffect, useState, use as usePromise } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 type Track = {
   id: string | null;
@@ -26,6 +27,7 @@ type AlbumData = {
   description: { text: string; wikipediaUrl: string } | null;
   tracks: Track[];
   isLoggedIn: boolean;
+  inWatchlist: boolean;
 };
 
 function formatTrackDuration(totalSeconds: number | null) {
@@ -41,10 +43,79 @@ export default function AlbumPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = usePromise(params);
+  const router = useRouter();
   const [data, setData] = useState<AlbumData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyTrackId, setBusyTrackId] = useState<string | null>(null);
+  const [watchlistBusy, setWatchlistBusy] = useState(false);
+  const [myLists, setMyLists] = useState<{ id: string; name: string }[]>([]);
+  const [showListPicker, setShowListPicker] = useState(false);
+  const [addedToListId, setAddedToListId] = useState<string | null>(null);
+
+  async function openListPicker() {
+    if (!data?.isLoggedIn) {
+      setError("Você precisa estar logado pra usar listas.");
+      return;
+    }
+    setShowListPicker((v) => !v);
+    if (myLists.length === 0) {
+      const res = await fetch("/api/lists");
+      const json = await res.json();
+      setMyLists((json.lists ?? []).map((l: any) => ({ id: l.id, name: l.name })));
+    }
+  }
+
+  async function addToList(listId: string) {
+    if (!data) return;
+    await fetch(`/api/lists/${listId}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        musicbrainzReleaseGroupId: id,
+        title: data.album.title,
+        artistName: data.album.artistName,
+        artistMusicbrainzId: data.album.artistId,
+        coverUrl: data.album.coverUrl,
+        year: data.album.year,
+      }),
+    });
+    setAddedToListId(listId);
+    setShowListPicker(false);
+  }
+
+  async function toggleWatchlist() {
+    if (!data) return;
+    if (!data.isLoggedIn) {
+      setError("Você precisa estar logado pra usar o 'Quero ouvir'.");
+      return;
+    }
+    const next = !data.inWatchlist;
+    setWatchlistBusy(true);
+    setData({ ...data, inWatchlist: next });
+    try {
+      const res = await fetch("/api/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          musicbrainzReleaseGroupId: id,
+          title: data.album.title,
+          artistName: data.album.artistName,
+          artistMusicbrainzId: data.album.artistId,
+          coverUrl: data.album.coverUrl,
+          year: data.album.year,
+          action: next ? "add" : "remove",
+        }),
+      });
+      if (!res.ok) throw new Error();
+      router.refresh();
+    } catch {
+      setData((prev) => (prev ? { ...prev, inWatchlist: !next } : prev));
+      setError("Erro ao salvar. Tenta de novo.");
+    } finally {
+      setWatchlistBusy(false);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/album/${id}`)
@@ -101,6 +172,10 @@ export default function AlbumPage({
             }
           : prev
       );
+
+      // Invalida o cache de navegação do Next.js — sem isso, ir direto
+      // pro /profile depois pode mostrar o total de horas desatualizado.
+      router.refresh();
     } catch {
       // reverte
       setData((prev) =>
@@ -168,9 +243,56 @@ export default function AlbumPage({
           />
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="font-display italic text-2xl text-paper leading-tight">
-            {data.album.title}
-          </h1>
+          <div className="flex items-start justify-between gap-2">
+            <h1 className="font-display italic text-2xl text-paper leading-tight">
+              {data.album.title}
+            </h1>
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="relative">
+                <button
+                  onClick={openListPicker}
+                  title="Adicionar a uma lista"
+                  className="w-8 h-8 flex items-center justify-center rounded-full border border-white/15 text-paper-muted hover:text-paper transition-colors"
+                >
+                  +
+                </button>
+                {showListPicker && (
+                  <div className="absolute right-0 top-9 z-10 w-48 bg-panel border border-white/10 rounded-lg shadow-lg py-1">
+                    {myLists.length === 0 && (
+                      <p className="text-xs text-paper-muted px-3 py-2">
+                        Nenhuma lista ainda.{" "}
+                        <Link href="/lists" className="underline">
+                          Criar uma
+                        </Link>
+                      </p>
+                    )}
+                    {myLists.map((list) => (
+                      <button
+                        key={list.id}
+                        onClick={() => addToList(list.id)}
+                        className="w-full text-left text-sm text-paper px-3 py-2 hover:bg-panel-raised transition-colors truncate"
+                      >
+                        {addedToListId === list.id ? "✓ " : ""}
+                        {list.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={toggleWatchlist}
+                disabled={watchlistBusy}
+                title={data.inWatchlist ? "Remover de 'Quero ouvir'" : "Adicionar a 'Quero ouvir'"}
+                className={`text-lg leading-none w-8 h-8 flex items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+                  data.inWatchlist
+                    ? "bg-amber/10 border-amber-dim text-amber"
+                    : "border-white/15 text-paper-muted hover:text-paper"
+                }`}
+              >
+                {data.inWatchlist ? "★" : "☆"}
+              </button>
+            </div>
+          </div>
           <p className="text-paper-muted mt-1">
             {data.album.artistId ? (
               <Link
