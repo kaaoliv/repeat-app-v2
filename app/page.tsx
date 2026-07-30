@@ -109,6 +109,7 @@ export default function HomePage() {
       }
 
       setFeedback(`"${album.title}" marcado como ouvido!`);
+      router.refresh();
     } finally {
       setLoggingId(null);
     }
