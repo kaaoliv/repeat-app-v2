@@ -11,8 +11,9 @@ export const dynamic = "force-dynamic";
 
 function formatDuration(totalSeconds: number) {
   const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
   const days = Math.floor(hours / 24);
-  return { hours, days };
+  return { hours, minutes, days };
 }
 
 // Calcula quantos dias seguidos (contando hoje ou ontem como início) a
@@ -46,22 +47,33 @@ function calculateStreak(listenDates: string[]): number {
 
 // O contador de horas: cada dígito na sua própria janelinha, estilo
 // odômetro. Mantido, mas repaginado pro tema escuro/violeta.
-function OdometerDigits({ value, digits = 4 }: { value: number; digits?: number }) {
+function OdometerDigits({
+  value,
+  digits = 4,
+  size = "large",
+}: {
+  value: number;
+  digits?: number;
+  size?: "large" | "small";
+}) {
   const padded = Math.min(value, 10 ** digits - 1)
     .toString()
     .padStart(digits, "0")
     .split("");
+
+  const boxClass =
+    size === "large"
+      ? "w-12 h-16 sm:w-16 sm:h-20 text-4xl sm:text-5xl"
+      : "w-9 h-12 sm:w-11 sm:h-14 text-2xl sm:text-3xl";
 
   return (
     <div className="flex gap-1.5 justify-center">
       {padded.map((digit, i) => (
         <span
           key={i}
-          className="w-12 h-16 sm:w-16 sm:h-20 bg-bg border border-white/10 rounded-lg flex items-center justify-center shadow-[inset_0_2px_10px_rgba(0,0,0,0.7)]"
+          className={`${boxClass} bg-bg border border-white/10 rounded-lg flex items-center justify-center shadow-[inset_0_2px_10px_rgba(0,0,0,0.7)]`}
         >
-          <span className="font-display font-bold text-4xl sm:text-5xl text-ink tabular-nums">
-            {digit}
-          </span>
+          <span className="font-display font-bold text-ink tabular-nums">{digit}</span>
         </span>
       ))}
     </div>
@@ -119,7 +131,7 @@ export default async function ProfilePage() {
     .eq("follower_id", user.id);
 
   const totalSeconds = totals?.total_seconds ?? 0;
-  const { hours, days } = formatDuration(totalSeconds);
+  const { hours, minutes, days } = formatDuration(totalSeconds);
 
   const { data: recentListens } = await supabase
     .from("track_listens")
@@ -189,12 +201,23 @@ export default async function ProfilePage() {
           Horas ouvidas
         </p>
         <div className="relative">
-          <OdometerDigits value={hours} />
+          {days > 0 ? (
+            <OdometerDigits value={hours} />
+          ) : (
+            <div className="flex items-end justify-center gap-2">
+              <OdometerDigits value={hours} digits={2} size="small" />
+              <span className="text-ink-muted text-xl font-display font-bold mb-2.5">h</span>
+              <OdometerDigits value={minutes} digits={2} size="small" />
+              <span className="text-ink-muted text-xl font-display font-bold mb-2.5">m</span>
+            </div>
+          )}
         </div>
         <p className="relative text-ink-muted text-sm text-center mt-6">
           {days > 0
             ? `≈ ${days} dia${days === 1 ? "" : "s"} inteiro${days === 1 ? "" : "s"} da sua vida em música`
-            : "vai ouvindo que o contador gira"}
+            : totalSeconds > 0
+              ? "seu extrato de vida em música"
+              : "vai ouvindo que o contador gira"}
         </p>
         {streak > 0 && (
           <p className="relative inline-flex items-center gap-1.5 text-gold text-sm mt-4 mx-auto w-full justify-center font-medium">
