@@ -1,7 +1,7 @@
-import Image from "next/image";
 import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import FollowButton from "@/app/components/FollowButton";
+import AlbumCover from "@/app/components/AlbumCover";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +30,8 @@ export default async function PublicProfilePage({
 
   if (!profile) {
     return (
-      <main className="max-w-2xl mx-auto px-4 py-12">
-        <p className="text-paper-muted">Usuário @{username} não encontrado.</p>
+      <main className="px-4 pt-9">
+        <p className="text-ink-muted">Usuário @{username} não encontrado.</p>
       </main>
     );
   }
@@ -87,19 +87,20 @@ export default async function PublicProfilePage({
   const isOwnProfile = viewer?.id === profile.id;
 
   return (
-    <main className="max-w-2xl mx-auto px-4 py-12">
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-4">
-          <div className="relative w-16 h-16 shrink-0 rounded-full overflow-hidden bg-panel border border-white/5">
-            {profile.avatar_url && (
-              <Image src={profile.avatar_url} alt={profile.username} fill className="object-cover" />
-            )}
-          </div>
-          <div>
-            <h1 className="font-display italic text-2xl text-paper">
+    <main className="px-4 pt-9 pb-8">
+      <div className="flex items-center justify-between mb-8 gap-3">
+        <div className="flex items-center gap-4 min-w-0">
+          <AlbumCover
+            src={profile.avatar_url}
+            alt={profile.username}
+            className="w-16 h-16 shrink-0 rounded-full"
+            sizes="64px"
+          />
+          <div className="min-w-0">
+            <h1 className="font-display font-extrabold text-2xl text-ink truncate">
               {profile.display_name || `@${profile.username}`}
             </h1>
-            <p className="text-paper-muted text-sm">@{profile.username}</p>
+            <p className="text-ink-muted text-sm">@{profile.username}</p>
           </div>
         </div>
         {!isOwnProfile && viewer && (
@@ -107,34 +108,37 @@ export default async function PublicProfilePage({
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mb-8 text-center">
-        <div className="bg-panel border border-white/5 rounded-lg py-4">
-          <p className="font-counter text-xl text-amber">{hours}h</p>
-          <p className="text-xs text-paper-muted mt-1">ouvidas</p>
+      <div className="grid grid-cols-3 gap-2.5 mb-8 text-center">
+        <div className="bg-surface border border-line rounded-xl py-4">
+          <p className="font-display font-bold text-xl text-primary-soft">{hours}h</p>
+          <p className="text-xs text-ink-muted mt-1">ouvidas</p>
         </div>
-        <div className="bg-panel border border-white/5 rounded-lg py-4">
-          <p className="font-counter text-xl text-paper">{followerCount ?? 0}</p>
-          <p className="text-xs text-paper-muted mt-1">seguidores</p>
+        <div className="bg-surface border border-line rounded-xl py-4">
+          <p className="font-display font-bold text-xl text-ink">{followerCount ?? 0}</p>
+          <p className="text-xs text-ink-muted mt-1">seguidores</p>
         </div>
-        <div className="bg-panel border border-white/5 rounded-lg py-4">
-          <p className="font-counter text-xl text-paper">{followingCount ?? 0}</p>
-          <p className="text-xs text-paper-muted mt-1">seguindo</p>
+        <div className="bg-surface border border-line rounded-xl py-4">
+          <p className="font-display font-bold text-xl text-ink">{followingCount ?? 0}</p>
+          <p className="text-xs text-ink-muted mt-1">seguindo</p>
         </div>
       </div>
 
-      <h2 className="font-display italic text-xl text-paper mb-4">Atividade recente</h2>
-      <div className="grid grid-cols-4 gap-3">
-        {recentAlbums.map((album, i) => (
-          <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-chassis">
-            {album.coverUrl && (
-              <Image src={album.coverUrl} alt={album.title} fill className="object-cover" />
-            )}
-          </div>
-        ))}
-        {recentAlbums.length === 0 && (
-          <p className="text-paper-muted text-sm col-span-full">Nada ouvido ainda.</p>
-        )}
-      </div>
+      <h2 className="font-display font-semibold text-xl text-ink mb-4">Atividade recente</h2>
+      {recentAlbums.length === 0 ? (
+        <p className="text-ink-muted text-sm">Nada ouvido ainda.</p>
+      ) : (
+        <div className="grid grid-cols-4 gap-3">
+          {recentAlbums.map((album, i) => (
+            <AlbumCover
+              key={i}
+              src={album.coverUrl}
+              alt={album.title}
+              className="aspect-square rounded-lg"
+              sizes="25vw"
+            />
+          ))}
+        </div>
+      )}
     </main>
   );
 }

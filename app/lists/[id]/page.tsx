@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, use as usePromise } from "react";
-import Image from "next/image";
 import Link from "next/link";
+import AlbumCover from "@/app/components/AlbumCover";
+import PageHeader from "@/app/components/PageHeader";
+import EmptyState from "@/app/components/EmptyState";
 
 type ListData = {
   list: {
@@ -65,78 +67,74 @@ export default function ListDetailPage({
 
   if (loading) {
     return (
-      <main className="max-w-2xl mx-auto px-4 py-12">
-        <p className="text-paper-muted">Carregando...</p>
+      <main className="px-4 pt-9">
+        <p className="text-ink-muted">Carregando...</p>
       </main>
     );
   }
 
   if (error || !data) {
     return (
-      <main className="max-w-2xl mx-auto px-4 py-12">
-        <p className="text-paper-muted">{error ?? "Lista não encontrada."}</p>
+      <main className="px-4 pt-9">
+        <p className="text-ink-muted">{error ?? "Lista não encontrada."}</p>
       </main>
     );
   }
 
   return (
-    <main className="max-w-2xl mx-auto px-4 py-12">
-      <Link href="/lists" className="text-paper-muted text-sm hover:text-paper transition-colors">
-        ← Minhas listas
-      </Link>
-      <h1 className="font-display italic text-3xl text-paper mt-4">{data.list.name}</h1>
-      {data.list.description && (
-        <p className="text-paper-muted mt-1">{data.list.description}</p>
-      )}
+    <main className="pb-8">
+      <PageHeader
+        title={data.list.name}
+        subtitle={data.list.description ?? undefined}
+        backHref="/lists"
+      />
 
-      <ul className="space-y-2 mt-6">
-        {data.list.list_items.map((item) => (
-          <li
-            key={item.album_id}
-            className="flex items-center gap-4 bg-panel border border-white/5 rounded-lg p-3"
-          >
-            <Link
-              href={`/album/${item.albums.musicbrainz_id}`}
-              className="flex items-center gap-4 flex-1 min-w-0"
-            >
-              <div className="relative w-14 h-14 shrink-0 rounded overflow-hidden bg-chassis">
-                {item.albums.cover_url && (
-                  <Image
+      <div className="px-4">
+        {data.list.list_items.length === 0 ? (
+          <EmptyState
+            title="Lista vazia"
+            description="Adiciona álbuns pela tela de álbum, usando o botão '+ Lista'."
+            cta={{ label: "Buscar álbuns", href: "/" }}
+            tone="pink"
+          />
+        ) : (
+          <ul className="space-y-2">
+            {data.list.list_items.map((item) => (
+              <li
+                key={item.album_id}
+                className="flex items-center gap-4 bg-surface border border-line rounded-xl p-3"
+              >
+                <Link
+                  href={`/album/${item.albums.musicbrainz_id}`}
+                  className="flex items-center gap-4 flex-1 min-w-0"
+                >
+                  <AlbumCover
                     src={item.albums.cover_url}
                     alt={item.albums.title}
-                    fill
+                    className="w-14 h-14 shrink-0 rounded-lg"
                     sizes="56px"
-                    className="object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
                   />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-ink truncate">{item.albums.title}</p>
+                    <p className="text-sm text-ink-muted truncate">
+                      {item.albums.artists?.name}
+                    </p>
+                  </div>
+                </Link>
+                {data.isOwner && (
+                  <button
+                    onClick={() => removeAlbum(item.album_id)}
+                    className="text-ink-faint hover:text-coral text-sm shrink-0 px-2 transition-colors"
+                    title="Remover da lista"
+                  >
+                    ✕
+                  </button>
                 )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-paper truncate">{item.albums.title}</p>
-                <p className="text-sm text-paper-muted truncate">
-                  {item.albums.artists?.name}
-                </p>
-              </div>
-            </Link>
-            {data.isOwner && (
-              <button
-                onClick={() => removeAlbum(item.album_id)}
-                className="text-paper-muted hover:text-paper text-sm shrink-0 px-2"
-                title="Remover da lista"
-              >
-                ✕
-              </button>
-            )}
-          </li>
-        ))}
-        {data.list.list_items.length === 0 && (
-          <p className="text-paper-muted text-sm">
-            Lista vazia. Adiciona álbuns pela tela de álbum.
-          </p>
+              </li>
+            ))}
+          </ul>
         )}
-      </ul>
+      </div>
     </main>
   );
 }

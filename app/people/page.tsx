@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
+import AlbumCover from "../components/AlbumCover";
+import PageHeader from "../components/PageHeader";
 
 type PersonResult = {
   username: string;
@@ -29,51 +30,63 @@ export default function PeoplePage() {
   }
 
   return (
-    <main className="max-w-2xl mx-auto px-4 py-12">
-      <Link href="/profile" className="text-paper-muted text-sm hover:text-paper transition-colors">
-        ← Perfil
-      </Link>
-      <h1 className="font-display italic text-3xl text-paper mt-4 mb-6">Buscar pessoas</h1>
+    <main className="pb-8">
+      <PageHeader title="Buscar pessoas" />
+      <div className="px-4">
+        <form onSubmit={handleSearch} className="relative mb-6">
+          <svg
+            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink-faint"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          >
+            <circle cx="11" cy="11" r="6.5" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Busca por username..."
+            className="w-full rounded-full border border-line bg-surface py-3 pl-11 pr-24 text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-primary/60"
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition-[filter] hover:brightness-110 disabled:opacity-50"
+          >
+            {loading ? "..." : "Buscar"}
+          </button>
+        </form>
 
-      <form onSubmit={handleSearch} className="flex gap-2 mb-6">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Busca por username..."
-          className="flex-1 bg-panel border border-white/5 rounded-lg px-4 py-2.5 outline-none focus:border-amber-dim/60 text-paper placeholder:text-paper-muted/60"
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          className="bg-amber text-chassis rounded-lg px-5 py-2.5 font-medium disabled:opacity-50"
-        >
-          {loading ? "..." : "Buscar"}
-        </button>
-      </form>
-
-      <ul className="space-y-2">
-        {results.map((person) => (
-          <li key={person.username}>
-            <Link
-              href={`/u/${person.username}`}
-              className="flex items-center gap-3 bg-panel border border-white/5 rounded-lg p-3 hover:border-amber-dim/30 transition-colors"
-            >
-              <div className="relative w-10 h-10 shrink-0 rounded-full overflow-hidden bg-chassis">
-                {person.avatar_url && (
-                  <Image src={person.avatar_url} alt={person.username} fill className="object-cover" />
-                )}
-              </div>
-              <div className="min-w-0">
-                <p className="text-paper truncate">{person.display_name || person.username}</p>
-                <p className="text-sm text-paper-muted truncate">@{person.username}</p>
-              </div>
-            </Link>
-          </li>
-        ))}
-        {results.length === 0 && query.length >= 2 && !loading && (
-          <p className="text-paper-muted text-sm">Ninguém encontrado.</p>
-        )}
-      </ul>
+        <ul className="space-y-2">
+          {results.map((person) => (
+            <li key={person.username}>
+              <Link
+                href={`/u/${person.username}`}
+                className="flex items-center gap-3 bg-surface border border-line rounded-xl p-3 hover:border-white/20 transition-colors"
+              >
+                <AlbumCover
+                  src={person.avatar_url}
+                  alt={person.username}
+                  className="w-10 h-10 shrink-0 rounded-full"
+                  sizes="40px"
+                />
+                <div className="min-w-0">
+                  <p className="text-ink truncate">{person.display_name || person.username}</p>
+                  <p className="text-sm text-ink-muted truncate">@{person.username}</p>
+                </div>
+              </Link>
+            </li>
+          ))}
+          {results.length === 0 && query.length >= 2 && !loading && (
+            <p className="text-ink-muted text-sm">Ninguém encontrado.</p>
+          )}
+        </ul>
+      </div>
     </main>
   );
 }
