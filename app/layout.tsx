@@ -1,19 +1,12 @@
-import type { Metadata } from "next";
-import { Fraunces, IBM_Plex_Mono, Inter } from "next/font/google";
-import Header from "./components/Header";
+import type { Metadata, Viewport } from "next";
+import { Bricolage_Grotesque, Inter } from "next/font/google";
+import BottomNav from "./components/BottomNav";
 import "./globals.css";
 
-const fraunces = Fraunces({
+const display = Bricolage_Grotesque({
   subsets: ["latin"],
   variable: "--font-display",
-  weight: ["500", "600"],
-  style: ["normal", "italic"],
-});
-
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  variable: "--font-counter",
-  weight: ["500", "700"],
+  weight: ["600", "700", "800"],
 });
 
 const inter = Inter({
@@ -22,8 +15,14 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Repeat",
-  description: "Quanto tempo da sua vida você já gastou ouvindo música?",
+  title: "Repeat — seu diário de escuta",
+  description:
+    "Quanto tempo da sua vida você já gastou ouvindo música? Faixa por faixa, com repetições contando de verdade.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0c0c11",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({
@@ -32,10 +31,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR" className={`${fraunces.variable} ${plexMono.variable} ${inter.variable}`}>
-      <body className="bg-chassis text-paper min-h-screen antialiased font-body">
-        <Header />
-        {children}
+    <html
+      lang="pt-BR"
+      className={`${display.variable} ${inter.variable} bg-bg`}
+    >
+      <body className="bg-bg text-ink min-h-screen antialiased font-sans">
+        <div className="mx-auto w-full max-w-xl min-h-screen pb-28">
+          {children}
+        </div>
+        <BottomNav />
       </body>
     </html>
   );

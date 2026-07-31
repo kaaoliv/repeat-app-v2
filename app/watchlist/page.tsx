@@ -1,6 +1,7 @@
-import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
-import AlbumCover from "../components/AlbumCover";
+import PageHeader from "../components/PageHeader";
+import EmptyState from "../components/EmptyState";
+import AlbumCard from "../components/AlbumCard";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +13,8 @@ export default async function WatchlistPage() {
 
   if (!user) {
     return (
-      <main className="max-w-2xl mx-auto px-4 py-12">
-        <p className="text-paper-muted">Faça login pra ver sua lista.</p>
+      <main className="px-4 pt-9">
+        <p className="text-ink-muted">Faça login pra ver sua lista.</p>
       </main>
     );
   }
@@ -24,47 +25,38 @@ export default async function WatchlistPage() {
     .eq("user_id", user.id)
     .order("added_at", { ascending: false });
 
-  const items = data ?? [];
+  const items = (data ?? []).filter((item: any) => item.albums);
 
   return (
-    <main className="max-w-2xl mx-auto px-4 py-12">
-      <Link href="/profile" className="text-paper-muted text-sm hover:text-paper transition-colors">
-        ← Perfil
-      </Link>
-      <h1 className="font-display italic text-3xl text-paper mt-4 mb-6">Quero ouvir</h1>
-
-      <ul className="space-y-2">
-        {items.map((item: any, i: number) => {
-          const album = item.albums;
-          if (!album) return null;
-          return (
-            <li key={i}>
-              <Link
-                href={`/album/${album.musicbrainz_id}`}
-                className="flex items-center gap-4 bg-panel border border-white/5 rounded-lg p-3 hover:border-amber-dim/30 transition-colors"
-              >
-                <AlbumCover
-                  src={album.cover_url}
-                  alt={album.title}
-                  className="w-14 h-14 shrink-0 rounded"
-                  sizes="56px"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-paper truncate">{album.title}</p>
-                  <p className="text-sm text-paper-muted truncate">
-                    {album.artists?.name}
-                  </p>
-                </div>
-              </Link>
-            </li>
-          );
-        })}
-        {items.length === 0 && (
-          <p className="text-paper-muted text-sm">
-            Nada por aqui ainda. Marca álbuns com a estrela ☆ na tela de álbum.
-          </p>
+    <main className="pb-8">
+      <PageHeader title="Quero ouvir" count={items.length || undefined} />
+      <div className="px-4">
+        {items.length === 0 ? (
+          <EmptyState
+            title="Nada salvo ainda"
+            description="Marca álbuns com a estrela ☆ na tela do álbum pra guardar aqui."
+            cta={{ label: "Buscar álbuns", href: "/" }}
+            tone="gold"
+          />
+        ) : (
+          <ul className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-6">
+            {items.map((item: any, i: number) => {
+              const album = item.albums;
+              return (
+                <li key={i}>
+                  <AlbumCard
+                    href={`/album/${album.musicbrainz_id}`}
+                    title={album.title}
+                    subtitle={album.artists?.name}
+                    coverUrl={album.cover_url}
+                    accent="gold"
+                  />
+                </li>
+              );
+            })}
+          </ul>
         )}
-      </ul>
+      </div>
     </main>
   );
 }

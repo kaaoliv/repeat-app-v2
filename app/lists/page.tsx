@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import PageHeader from "../components/PageHeader";
+import EmptyState from "../components/EmptyState";
 
 type ListSummary = {
   id: string;
@@ -58,80 +60,86 @@ export default function ListsPage() {
   }
 
   return (
-    <main className="max-w-2xl mx-auto px-4 py-12">
-      <Link href="/profile" className="text-paper-muted text-sm hover:text-paper transition-colors">
-        ← Perfil
-      </Link>
-      <div className="flex items-center justify-between mt-4 mb-6">
-        <h1 className="font-display italic text-3xl text-paper">Minhas listas</h1>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="text-sm bg-amber text-chassis rounded-lg px-4 py-2 font-medium hover:brightness-110 transition-[filter]"
-        >
-          + Nova lista
-        </button>
-      </div>
-
-      {error && (
-        <p className="text-sm mb-4 text-paper-muted bg-panel border border-white/5 rounded-lg px-4 py-2">
-          {error}
-        </p>
-      )}
-
-      {showForm && (
-        <form
-          onSubmit={handleCreate}
-          className="mb-6 bg-panel border border-white/5 rounded-lg p-4 space-y-3"
-        >
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nome da lista (ex: Pra treino)"
-            className="w-full bg-chassis border border-white/5 rounded-lg px-3 py-2 outline-none focus:border-amber-dim/60 text-paper placeholder:text-paper-muted/60"
-          />
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Descrição (opcional)"
-            className="w-full bg-chassis border border-white/5 rounded-lg px-3 py-2 outline-none focus:border-amber-dim/60 text-paper placeholder:text-paper-muted/60"
-          />
+    <main className="pb-8">
+      <PageHeader
+        title="Minhas listas"
+        action={
           <button
-            type="submit"
-            disabled={creating || !name.trim()}
-            className="text-sm bg-amber text-chassis rounded-lg px-4 py-2 font-medium disabled:opacity-50"
+            onClick={() => setShowForm((v) => !v)}
+            className="text-sm bg-primary text-white rounded-full px-4 py-2 font-semibold hover:brightness-110 transition-[filter]"
           >
-            {creating ? "Criando..." : "Criar"}
+            + Nova
           </button>
-        </form>
-      )}
+        }
+      />
 
-      {!loading && (
-        <ul className="space-y-2">
-          {lists.map((list) => (
-            <li key={list.id}>
-              <Link
-                href={`/lists/${list.id}`}
-                className="flex items-center justify-between gap-4 bg-panel border border-white/5 rounded-lg px-4 py-3 hover:border-amber-dim/30 transition-colors"
-              >
-                <div className="min-w-0">
-                  <p className="font-medium text-paper truncate">{list.name}</p>
-                  {list.description && (
-                    <p className="text-sm text-paper-muted truncate">{list.description}</p>
-                  )}
-                </div>
-                <span className="text-xs text-paper-muted font-counter shrink-0">
-                  {list.list_items?.[0]?.count ?? 0} álbuns
-                </span>
-              </Link>
-            </li>
-          ))}
-          {lists.length === 0 && (
-            <p className="text-paper-muted text-sm">
-              Você ainda não criou nenhuma lista.
-            </p>
-          )}
-        </ul>
-      )}
+      <div className="px-4">
+        {error && (
+          <p className="text-sm mb-4 text-ink-muted bg-surface border border-line rounded-xl px-4 py-2.5">
+            {error}
+          </p>
+        )}
+
+        {showForm && (
+          <form
+            onSubmit={handleCreate}
+            className="mb-6 bg-surface border border-line rounded-xl p-4 space-y-3"
+          >
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Nome da lista (ex: Pra treino)"
+              className="w-full bg-bg border border-line rounded-lg px-3 py-2 outline-none focus:border-primary/60 text-ink placeholder:text-ink-faint"
+            />
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Descrição (opcional)"
+              className="w-full bg-bg border border-line rounded-lg px-3 py-2 outline-none focus:border-primary/60 text-ink placeholder:text-ink-faint"
+            />
+            <button
+              type="submit"
+              disabled={creating || !name.trim()}
+              className="text-sm bg-primary text-white rounded-full px-4 py-2 font-semibold disabled:opacity-50"
+            >
+              {creating ? "Criando..." : "Criar"}
+            </button>
+          </form>
+        )}
+
+        {!loading && (
+          <>
+            {lists.length === 0 ? (
+              <EmptyState
+                title="Nenhuma lista ainda"
+                description="Crie coleções personalizadas, tipo 'Pra treino' ou 'Chorar no busão' — usa o botão '+ Nova' ali em cima."
+                tone="pink"
+              />
+            ) : (
+              <ul className="space-y-2">
+                {lists.map((list) => (
+                  <li key={list.id}>
+                    <Link
+                      href={`/lists/${list.id}`}
+                      className="flex items-center justify-between gap-4 bg-surface border border-line rounded-xl px-4 py-3 hover:border-white/20 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium text-ink truncate">{list.name}</p>
+                        {list.description && (
+                          <p className="text-sm text-ink-muted truncate">{list.description}</p>
+                        )}
+                      </div>
+                      <span className="text-xs text-ink-muted tabular-nums shrink-0">
+                        {list.list_items?.[0]?.count ?? 0} álbuns
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
     </main>
   );
 }
