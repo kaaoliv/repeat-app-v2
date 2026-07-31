@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { MBRelease, MBArtist } from "@/lib/musicbrainz";
 import AlbumCover from "./components/AlbumCover";
+import AlbumCarousel, { type CarouselItem } from "./components/AlbumCarousel";
 import { formatAlbumDuration, formatTrackDuration } from "@/lib/format";
 
 export default function HomePage() {
@@ -18,6 +19,51 @@ export default function HomePage() {
   const [loggedIds, setLoggedIds] = useState<Set<string>>(new Set());
   const [feedback, setFeedback] = useState<string | null>(null);
   const fetchingDurations = useRef(new Set<string>());
+
+  const [friendsListened, setFriendsListened] = useState<CarouselItem[]>([]);
+  const [trending, setTrending] = useState<CarouselItem[]>([]);
+  const [newReleases, setNewReleases] = useState<CarouselItem[]>([]);
+  const [feedLoading, setFeedLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/home-feed")
+      .then((res) => res.json())
+      .then((data) => {
+        setFriendsListened(
+          (data.friendsListened ?? []).map((a: any) => ({
+            href: `/album/${a.musicbrainzId}`,
+            title: a.title,
+            subtitle: a.artistName,
+            coverUrl: a.coverUrl,
+            badge: { color: "pink" as const, label: a.friendName, corner: "tl" as const },
+          }))
+        );
+        setTrending(
+          (data.trending ?? []).map((a: any) => ({
+            href: `/album/${a.musicbrainzId}`,
+            title: a.title,
+            subtitle: a.artistName,
+            coverUrl: a.coverUrl,
+            badge: {
+              color: "coral" as const,
+              label: `🔥 ${a.listeners}`,
+              corner: "tl" as const,
+            },
+          }))
+        );
+        setNewReleases(
+          (data.newReleases ?? []).map((a: any) => ({
+            href: `/album/${a.musicbrainzId}`,
+            title: a.title,
+            subtitle: a.artistName,
+            coverUrl: a.coverUrl,
+            badge: a.year ? { color: "teal" as const, label: a.year, corner: "tl" as const } : undefined,
+          }))
+        );
+      })
+      .catch(() => {})
+      .finally(() => setFeedLoading(false));
+  }, []);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -149,6 +195,14 @@ export default function HomePage() {
         <p className="mb-5 rounded-xl border border-line bg-surface px-4 py-2.5 text-sm text-ink-muted">
           {feedback}
         </p>
+      )}
+
+      {!searched && !feedLoading && (
+        <div className="-mx-4">
+          <AlbumCarousel title="Amigos ouviram" emoji="👥" items={friendsListened} accent="pink" />
+          <AlbumCarousel title="Em alta" emoji="🔥" items={trending} accent="coral" />
+          <AlbumCarousel title="Últimos lançamentos" emoji="✨" items={newReleases} accent="teal" />
+        </div>
       )}
 
       {/* Card de artista no topo dos resultados */}

@@ -57,6 +57,41 @@ export async function searchArtists(query: string): Promise<MBArtist[]> {
     }));
 }
 
+export type MBNewRelease = MBArtistAlbum & { artistName: string };
+
+// Busca lançamentos recentes. A MusicBrainz não tem um endpoint dedicado
+// de "novidades" (diferente do Spotify, que descontinuou o dele em 2026),
+// então buscamos releases do tipo "Album" com data de lançamento dentro
+// do ano corrente/anterior e ordenamos pela data mais recente nós mesmos.
+export async function getNewReleases(): Promise<MBNewRelease[]> {
+  const currentYear = new Date().getFullYear();
+  const query = `primarytype:Album AND (firstreleasedate:[${currentYear - 1}-01-01 TO ${currentYear}-12-31])`;
+  const url = `${MB_BASE}/release-group/?query=${encodeURIComponent(
+    query
+  )}&fmt=json&limit=25`;
+
+  const res = await mbFetch(url, 3600);
+  if (!res || !res.ok) return [];
+
+  const data = await res.json();
+  const albums: (MBNewRelease & { releaseDate: string })[] = (
+    data["release-groups"] ?? []
+  ).map((rg: any) => ({
+    id: rg.id,
+    title: rg.title,
+    year: rg["first-release-date"]?.slice(0, 4) || null,
+    coverUrl: `https://coverartarchive.org/release-group/${rg.id}/front-250`,
+    primaryType: rg["primary-type"] ?? null,
+    artistName: rg["artist-credit"]?.[0]?.name ?? "Artista desconhecido",
+    releaseDate: rg["first-release-date"] ?? "",
+  }));
+
+  return albums
+    .filter((a) => a.releaseDate)
+    .sort((a, b) => (b.releaseDate < a.releaseDate ? -1 : 1))
+    .slice(0, 12);
+}
+
 export type MBArtistAlbum = {
   id: string;
   title: string;
