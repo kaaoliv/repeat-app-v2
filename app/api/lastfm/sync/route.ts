@@ -4,6 +4,7 @@ import { ensureAlbumExists } from "@/lib/album-helpers";
 import {
   getAlbumTracklist,
   findAlbumByArtistAndTitle,
+  findAlbumByArtistAndTrack,
   type MBTrack,
 } from "@/lib/musicbrainz";
 import { getRecentScrobbles, type LastfmScrobble } from "@/lib/lastfm";
@@ -26,15 +27,84 @@ function findBestTrackMatch(
   tracks: { id: string; title: string }[]
 ) {
   const normalizedScrobble = normalizeTitle(scrobbleTitle);
-  // 1. match exato (normalizado)
   let match = tracks.find((t) => normalizeTitle(t.title) === normalizedScrobble);
   if (match) return match;
-  // 2. um começa com o outro (cobre "Song" vs "Song (Bonus Track)")
   match = tracks.find((t) => {
     const nt = normalizeTitle(t.title);
     return nt.startsWith(normalizedScrobble) || normalizedScrobble.startsWith(nt);
   });
   return match ?? null;
+}
+
+type SyncStats = { matched: number; albumsSkipped: number; tracksUnmatched: number };
+
+// Processa um grupo de scrobbles que já sabemos pertencer ao mesmo álbum
+// (id da MusicBrainz já resolvido): garante que álbum+faixas existem no
+// banco, casa cada escuta com a faixa certa e registra.
+async function processAlbumGroup(
+  supabase: any,
+  albumMbid: string,
+  artistNameHint: string,
+  scrobbles: LastfmScrobble[],
+  stats: SyncStats
+) {
+  const album = await ensureAlbumExists(supabase, {
+    musicbrainzReleaseGroupId: albumMbid,
+    artistName: artistNameHint,
+  });
+  if (!album) {
+    stats.albumsSkipped++;
+    return;
+  }
+
+  const mbTracks: MBTrack[] = await getAlbumTracklist(albumMbid);
+  if (mbTracks.length === 0) {
+    stats.albumsSkipped++;
+    return;
+  }
+
+  const { data: dbTracks } = await supabase
+    .from("tracks")
+    .upsert(
+      mbTracks.map((t) => ({
+        album_id: album.id,
+        musicbrainz_recording_id: t.recordingId,
+        title: t.title,
+        duration_seconds: t.durationSeconds,
+        track_number: t.trackNumber,
+        disc_number: t.discNumber,
+      })),
+      { onConflict: "album_id,disc_number,track_number" }
+    )
+    .select("id, title");
+
+  if (!dbTracks) {
+    stats.albumsSkipped++;
+    return;
+  }
+
+  const countByTrackId = new Map<string, { count: number; latest: number }>();
+  for (const s of scrobbles) {
+    const track = findBestTrackMatch(s.trackName, dbTracks);
+    if (!track) {
+      stats.tracksUnmatched++;
+      continue;
+    }
+    const existing = countByTrackId.get(track.id) ?? { count: 0, latest: 0 };
+    existing.count += 1;
+    if (s.scrobbledAt && s.scrobbledAt > existing.latest) existing.latest = s.scrobbledAt;
+    countByTrackId.set(track.id, existing);
+  }
+
+  for (const [trackId, { count, latest }] of countByTrackId.entries()) {
+    await supabase.rpc("sync_track_listen", {
+      p_track_id: trackId,
+      p_play_count_delta: count,
+      p_listened_at: new Date(latest * 1000).toISOString(),
+      p_source: "lastfm",
+    });
+    stats.matched += count;
+  }
 }
 
 export async function POST() {
@@ -60,18 +130,24 @@ export async function POST() {
     : undefined;
 
   const allScrobbles = await getRecentScrobbles(profile.lastfm_username, since);
-  const scrobbles = allScrobbles.filter((s) => !s.nowPlaying && s.scrobbledAt);
-  const withoutAlbum = scrobbles.filter((s) => !s.albumName || !s.artistName).length;
+  const scrobbles = allScrobbles.filter((s) => !s.nowPlaying && s.scrobbledAt && s.artistName);
 
   if (scrobbles.length === 0) {
-    return NextResponse.json({ synced: 0, matched: 0, albumsSkipped: 0, tracksUnmatched: 0, withoutAlbum: 0 });
+    return NextResponse.json({ synced: 0, matched: 0, albumsSkipped: 0, tracksUnmatched: 0 });
   }
 
-  // Agrupa por álbum (artista + nome do álbum) pra resolver cada um só
-  // uma vez, mesmo que tenha várias faixas/escutas daquele álbum no lote.
-  const byAlbumKey = new Map<string, { artistName: string; albumName: string; scrobbles: LastfmScrobble[] }>();
+  const withAlbum = scrobbles.filter((s) => s.albumName);
+  const withoutAlbum = scrobbles.filter((s) => !s.albumName);
+
+  const stats: SyncStats = { matched: 0, albumsSkipped: 0, tracksUnmatched: 0 };
+  let maxScrobbledAt = since ?? 0;
   for (const s of scrobbles) {
-    if (!s.albumName || !s.artistName) continue; // sem álbum não dá pra registrar (ver withoutAlbum)
+    if (s.scrobbledAt && s.scrobbledAt > maxScrobbledAt) maxScrobbledAt = s.scrobbledAt;
+  }
+
+  // --- Caminho 1: scrobbles que já vêm com álbum informado ---
+  const byAlbumKey = new Map<string, { artistName: string; albumName: string; scrobbles: LastfmScrobble[] }>();
+  for (const s of withAlbum) {
     const key = `${s.artistName.toLowerCase()}::${s.albumName.toLowerCase()}`;
     if (!byAlbumKey.has(key)) {
       byAlbumKey.set(key, { artistName: s.artistName, albumName: s.albumName, scrobbles: [] });
@@ -79,88 +155,36 @@ export async function POST() {
     byAlbumKey.get(key)!.scrobbles.push(s);
   }
 
-  let matchedCount = 0;
-  let albumsSkipped = 0;
-  let tracksUnmatched = 0;
-  let maxScrobbledAt = since ?? 0;
-
   for (const group of byAlbumKey.values()) {
-    for (const s of group.scrobbles) {
-      if (s.scrobbledAt && s.scrobbledAt > maxScrobbledAt) maxScrobbledAt = s.scrobbledAt;
-    }
-
-    // Resolve o id do álbum na MusicBrainz: usa o mbid que o Last.fm já
-    // trouxer (mais confiável) ou busca por texto como fallback.
     const albumMbid =
       group.scrobbles.find((s) => s.albumMbid)?.albumMbid ??
       (await findAlbumByArtistAndTitle(group.artistName, group.albumName));
 
     if (!albumMbid) {
-      albumsSkipped++;
+      stats.albumsSkipped++;
       continue;
     }
+    await processAlbumGroup(supabase, albumMbid, group.artistName, group.scrobbles, stats);
+    await new Promise((r) => setTimeout(r, 250)); // não estourar rate limit da MusicBrainz
+  }
 
-    const album = await ensureAlbumExists(supabase, {
-      musicbrainzReleaseGroupId: albumMbid,
-      artistName: group.artistName,
-    });
-    if (!album) {
-      albumsSkipped++;
+  // --- Caminho 2: scrobbles sem álbum — busca pelo nome da música ---
+  const byTrackKey = new Map<string, { artistName: string; trackName: string; scrobbles: LastfmScrobble[] }>();
+  for (const s of withoutAlbum) {
+    const key = `${s.artistName.toLowerCase()}::${s.trackName.toLowerCase()}`;
+    if (!byTrackKey.has(key)) {
+      byTrackKey.set(key, { artistName: s.artistName, trackName: s.trackName, scrobbles: [] });
+    }
+    byTrackKey.get(key)!.scrobbles.push(s);
+  }
+
+  for (const group of byTrackKey.values()) {
+    const albumMbid = await findAlbumByArtistAndTrack(group.artistName, group.trackName);
+    if (!albumMbid) {
+      stats.albumsSkipped++;
       continue;
     }
-
-    const mbTracks: MBTrack[] = await getAlbumTracklist(albumMbid);
-    if (mbTracks.length === 0) {
-      albumsSkipped++;
-      continue;
-    }
-
-    const { data: dbTracks } = await supabase
-      .from("tracks")
-      .upsert(
-        mbTracks.map((t) => ({
-          album_id: album.id,
-          musicbrainz_recording_id: t.recordingId,
-          title: t.title,
-          duration_seconds: t.durationSeconds,
-          track_number: t.trackNumber,
-          disc_number: t.discNumber,
-        })),
-        { onConflict: "album_id,disc_number,track_number" }
-      )
-      .select("id, title");
-
-    if (!dbTracks) {
-      albumsSkipped++;
-      continue;
-    }
-
-    // Casa cada escuta com a faixa certa pelo título (com tolerância a
-    // diferenças de "(feat. ...)", remaster, maiúsculas, pontuação etc).
-    const countByTrackId = new Map<string, { count: number; latest: number }>();
-    for (const s of group.scrobbles) {
-      const track = findBestTrackMatch(s.trackName, dbTracks);
-      if (!track) {
-        tracksUnmatched++;
-        continue;
-      }
-      const existing = countByTrackId.get(track.id) ?? { count: 0, latest: 0 };
-      existing.count += 1;
-      if (s.scrobbledAt && s.scrobbledAt > existing.latest) existing.latest = s.scrobbledAt;
-      countByTrackId.set(track.id, existing);
-    }
-
-    for (const [trackId, { count, latest }] of countByTrackId.entries()) {
-      await supabase.rpc("sync_track_listen", {
-        p_track_id: trackId,
-        p_play_count_delta: count,
-        p_listened_at: new Date(latest * 1000).toISOString(),
-        p_source: "lastfm",
-      });
-      matchedCount += count;
-    }
-
-    // pequena pausa entre álbuns pra não estourar o rate limit da MusicBrainz
+    await processAlbumGroup(supabase, albumMbid, group.artistName, group.scrobbles, stats);
     await new Promise((r) => setTimeout(r, 250));
   }
 
@@ -173,9 +197,8 @@ export async function POST() {
 
   return NextResponse.json({
     synced: scrobbles.length,
-    matched: matchedCount,
-    albumsSkipped,
-    tracksUnmatched,
-    withoutAlbum,
+    matched: stats.matched,
+    albumsSkipped: stats.albumsSkipped,
+    tracksUnmatched: stats.tracksUnmatched,
   });
 }

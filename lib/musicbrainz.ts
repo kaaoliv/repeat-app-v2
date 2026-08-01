@@ -59,7 +59,7 @@ export async function searchArtists(query: string): Promise<MBArtist[]> {
 
 // Busca um álbum específico por nome de artista + nome do álbum — usado
 // quando uma fonte externa (Last.fm) não traz o id da MusicBrainz direto.
-// Só retorna se a confiança for alta, pra evitar casar errado.
+// Só retorna se a confiança for razoável, pra evitar casar errado.
 export async function findAlbumByArtistAndTitle(
   artistName: string,
   albumName: string
@@ -76,9 +76,39 @@ export async function findAlbumByArtistAndTitle(
 
   const data = await res.json();
   const best = (data["release-groups"] ?? [])[0];
-  if (!best || Number(best.score ?? 0) < 85) return null;
+  if (!best || Number(best.score ?? 0) < 70) return null;
 
   return best.id;
+}
+
+// Busca o álbum a partir de artista + nome da MÚSICA (não do álbum) —
+// usado quando o Last.fm não informa o álbum do scrobble, o que é comum
+// (varia por fonte: rádio, alguns players, faixas sem match perfeito).
+// Acha a gravação (recording) e retorna o release-group da primeira
+// release associada a ela.
+export async function findAlbumByArtistAndTrack(
+  artistName: string,
+  trackName: string
+): Promise<string | null> {
+  const escapedArtist = artistName.replace(/["\\]/g, "\\$&");
+  const escapedTrack = trackName.replace(/["\\]/g, "\\$&");
+  const query = `artist:"${escapedArtist}" AND recording:"${escapedTrack}"`;
+  const url = `${MB_BASE}/recording/?query=${encodeURIComponent(
+    query
+  )}&fmt=json&limit=5`;
+
+  const res = await mbFetch(url);
+  if (!res || !res.ok) return null;
+
+  const data = await res.json();
+  const recordings = data.recordings ?? [];
+
+  for (const rec of recordings) {
+    if (Number(rec.score ?? 0) < 70) break; // já ordenado por score, pode parar
+    const releaseGroupId = rec.releases?.[0]?.["release-group"]?.id;
+    if (releaseGroupId) return releaseGroupId;
+  }
+  return null;
 }
 
 export type MBNewRelease = MBArtistAlbum & { artistName: string };
