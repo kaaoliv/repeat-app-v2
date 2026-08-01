@@ -17,6 +17,7 @@ export default function LastfmConnector({
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [debugExamples, setDebugExamples] = useState<string[]>([]);
 
   async function handleSave() {
     setSaving(true);
@@ -72,6 +73,7 @@ export default function LastfmConnector({
               (json.albumsSkipped > 0 ? ` · ${json.albumsSkipped} álbum(ns) não identificado(s)` : "") +
               (json.tracksUnmatched > 0 ? ` · ${json.tracksUnmatched} faixa(s) não encontrada(s)` : "")
       );
+      setDebugExamples(json.skippedExamples ?? []);
       router.refresh();
     } finally {
       setSyncing(false);
@@ -146,6 +148,14 @@ export default function LastfmConnector({
         </div>
       </div>
       {syncResult && <p className="text-xs text-teal mt-2">{syncResult}</p>}
+      {debugExamples.length > 0 && (
+        <div className="mt-2 text-xs text-ink-faint space-y-0.5">
+          <p className="text-ink-muted">Exemplos não identificados (debug):</p>
+          {debugExamples.map((ex, i) => (
+            <p key={i}>{ex}</p>
+          ))}
+        </div>
+      )}
       {error && <p className="text-xs text-coral mt-2">{error}</p>}
     </div>
   );

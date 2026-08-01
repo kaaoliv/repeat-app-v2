@@ -114,7 +114,7 @@ export async function findAlbumByArtistAndTrack(
   const query = `artist:"${escapedArtist}" AND recording:"${escapedTrack}"`;
   const url = `${MB_BASE}/recording/?query=${encodeURIComponent(
     query
-  )}&fmt=json&limit=5&inc=releases+release-groups`;
+  )}&fmt=json&limit=5`;
 
   const res = await mbFetch(url);
   if (!res || !res.ok) return null;

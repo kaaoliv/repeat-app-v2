@@ -44,7 +44,12 @@ function findBestTrackMatch(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type SyncStats = { matched: number; albumsSkipped: number; tracksUnmatched: number };
+type SyncStats = {
+  matched: number;
+  albumsSkipped: number;
+  tracksUnmatched: number;
+  skippedExamples: string[];
+};
 
 // Processa um grupo de scrobbles que já sabemos pertencer ao mesmo álbum:
 // garante que álbum+faixas existem no banco, casa cada escuta com a faixa
@@ -157,7 +162,7 @@ export async function POST() {
   const withAlbum = scrobbles.filter((s) => s.albumName);
   const withoutAlbum = scrobbles.filter((s) => !s.albumName);
 
-  const stats: SyncStats = { matched: 0, albumsSkipped: 0, tracksUnmatched: 0 };
+  const stats: SyncStats = { matched: 0, albumsSkipped: 0, tracksUnmatched: 0, skippedExamples: [] };
   let maxScrobbledAt = since ?? 0;
   for (const s of scrobbles) {
     if (s.scrobbledAt && s.scrobbledAt > maxScrobbledAt) maxScrobbledAt = s.scrobbledAt;
@@ -181,6 +186,9 @@ export async function POST() {
 
     if (!resolved) {
       stats.albumsSkipped++;
+      if (stats.skippedExamples.length < 8) {
+        stats.skippedExamples.push(`[álbum] ${group.artistName} — ${group.albumName}`);
+      }
       continue;
     }
     await sleep(500);
@@ -202,6 +210,9 @@ export async function POST() {
     const resolved = await findAlbumByArtistAndTrack(group.artistName, group.trackName);
     if (!resolved) {
       stats.albumsSkipped++;
+      if (stats.skippedExamples.length < 8) {
+        stats.skippedExamples.push(`[música] ${group.artistName} — ${group.trackName}`);
+      }
       continue;
     }
     await sleep(500);
@@ -221,5 +232,6 @@ export async function POST() {
     matched: stats.matched,
     albumsSkipped: stats.albumsSkipped,
     tracksUnmatched: stats.tracksUnmatched,
+    skippedExamples: stats.skippedExamples,
   });
 }
