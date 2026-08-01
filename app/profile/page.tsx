@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import UsernameEditor from "../components/UsernameEditor";
+import LastfmConnector from "../components/LastfmConnector";
 import AlbumCover from "../components/AlbumCover";
 import { formatListenDate } from "@/lib/format";
 
@@ -116,7 +117,7 @@ export default async function ProfilePage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("username")
+    .select("username, lastfm_username, lastfm_last_synced_at")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -192,6 +193,13 @@ export default async function ProfilePage() {
         <span className="text-ink-muted">
           <span className="text-ink font-semibold">{followingCount ?? 0}</span> seguindo
         </span>
+      </div>
+
+      <div className="mb-8">
+        <LastfmConnector
+          initialUsername={profile?.lastfm_username ?? null}
+          lastSyncedAt={profile?.lastfm_last_synced_at ?? null}
+        />
       </div>
 
       {/* Hero de horas */}

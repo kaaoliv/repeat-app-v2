@@ -57,6 +57,30 @@ export async function searchArtists(query: string): Promise<MBArtist[]> {
     }));
 }
 
+// Busca um álbum específico por nome de artista + nome do álbum — usado
+// quando uma fonte externa (Last.fm) não traz o id da MusicBrainz direto.
+// Só retorna se a confiança for alta, pra evitar casar errado.
+export async function findAlbumByArtistAndTitle(
+  artistName: string,
+  albumName: string
+): Promise<string | null> {
+  const escapedArtist = artistName.replace(/["\\]/g, "\\$&");
+  const escapedAlbum = albumName.replace(/["\\]/g, "\\$&");
+  const query = `artist:"${escapedArtist}" AND releasegroup:"${escapedAlbum}"`;
+  const url = `${MB_BASE}/release-group/?query=${encodeURIComponent(
+    query
+  )}&fmt=json&limit=3`;
+
+  const res = await mbFetch(url);
+  if (!res || !res.ok) return null;
+
+  const data = await res.json();
+  const best = (data["release-groups"] ?? [])[0];
+  if (!best || Number(best.score ?? 0) < 85) return null;
+
+  return best.id;
+}
+
 export type MBNewRelease = MBArtistAlbum & { artistName: string };
 
 // Busca lançamentos recentes. A MusicBrainz não tem um endpoint dedicado
