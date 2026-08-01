@@ -57,13 +57,25 @@ export async function searchArtists(query: string): Promise<MBArtist[]> {
     }));
 }
 
+export type ResolvedAlbum = {
+  id: string;
+  title: string;
+  artistName: string;
+  artistId: string;
+  year: string | null;
+  coverUrl: string;
+};
+
 // Busca um álbum específico por nome de artista + nome do álbum — usado
 // quando uma fonte externa (Last.fm) não traz o id da MusicBrainz direto.
-// Só retorna se a confiança for razoável, pra evitar casar errado.
+// Já retorna os dados completos (não só o id), pra evitar uma segunda
+// chamada de "buscar informações do álbum" logo depois — importante pra
+// não estourar o rate limit da MusicBrainz quando processando um lote
+// grande de escutas (tipo na sincronização do Last.fm).
 export async function findAlbumByArtistAndTitle(
   artistName: string,
   albumName: string
-): Promise<string | null> {
+): Promise<ResolvedAlbum | null> {
   const escapedArtist = artistName.replace(/["\\]/g, "\\$&");
   const escapedAlbum = albumName.replace(/["\\]/g, "\\$&");
   const query = `artist:"${escapedArtist}" AND releasegroup:"${escapedAlbum}"`;
@@ -78,24 +90,31 @@ export async function findAlbumByArtistAndTitle(
   const best = (data["release-groups"] ?? [])[0];
   if (!best || Number(best.score ?? 0) < 70) return null;
 
-  return best.id;
+  return {
+    id: best.id,
+    title: best.title,
+    artistName: best["artist-credit"]?.[0]?.name ?? artistName,
+    artistId: best["artist-credit"]?.[0]?.artist?.id ?? "",
+    year: best["first-release-date"]?.slice(0, 4) || null,
+    coverUrl: `https://coverartarchive.org/release-group/${best.id}/front-250`,
+  };
 }
 
 // Busca o álbum a partir de artista + nome da MÚSICA (não do álbum) —
 // usado quando o Last.fm não informa o álbum do scrobble, o que é comum
 // (varia por fonte: rádio, alguns players, faixas sem match perfeito).
-// Acha a gravação (recording) e retorna o release-group da primeira
-// release associada a ela.
+// Acha a gravação (recording) e retorna dados do release-group da
+// primeira release associada a ela.
 export async function findAlbumByArtistAndTrack(
   artistName: string,
   trackName: string
-): Promise<string | null> {
+): Promise<ResolvedAlbum | null> {
   const escapedArtist = artistName.replace(/["\\]/g, "\\$&");
   const escapedTrack = trackName.replace(/["\\]/g, "\\$&");
   const query = `artist:"${escapedArtist}" AND recording:"${escapedTrack}"`;
   const url = `${MB_BASE}/recording/?query=${encodeURIComponent(
     query
-  )}&fmt=json&limit=5`;
+  )}&fmt=json&limit=5&inc=releases+release-groups`;
 
   const res = await mbFetch(url);
   if (!res || !res.ok) return null;
@@ -105,8 +124,17 @@ export async function findAlbumByArtistAndTrack(
 
   for (const rec of recordings) {
     if (Number(rec.score ?? 0) < 70) break; // já ordenado por score, pode parar
-    const releaseGroupId = rec.releases?.[0]?.["release-group"]?.id;
-    if (releaseGroupId) return releaseGroupId;
+    const release = rec.releases?.[0];
+    const rg = release?.["release-group"];
+    if (!rg?.id) continue;
+    return {
+      id: rg.id,
+      title: rg.title ?? release.title,
+      artistName: rec["artist-credit"]?.[0]?.name ?? artistName,
+      artistId: rec["artist-credit"]?.[0]?.artist?.id ?? "",
+      year: rg["first-release-date"]?.slice(0, 4) || null,
+      coverUrl: `https://coverartarchive.org/release-group/${rg.id}/front-250`,
+    };
   }
   return null;
 }

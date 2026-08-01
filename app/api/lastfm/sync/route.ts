@@ -6,8 +6,14 @@ import {
   findAlbumByArtistAndTitle,
   findAlbumByArtistAndTrack,
   type MBTrack,
+  type ResolvedAlbum,
 } from "@/lib/musicbrainz";
 import { getRecentScrobbles, type LastfmScrobble } from "@/lib/lastfm";
+
+// A rota demora (várias chamadas à MusicBrainz, com pausa entre elas pra
+// respeitar o rate limit). Sem isso, a Vercel corta a execução em 10s no
+// plano Hobby — pedimos o máximo permitido lá (60s).
+export const maxDuration = 60;
 
 // Remove sufixos comuns que fazem o mesmo título "parecer" diferente entre
 // Last.fm e MusicBrainz: "(feat. Fulano)", "- Remastered 2011", "(Live)" etc.
@@ -36,28 +42,36 @@ function findBestTrackMatch(
   return match ?? null;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 type SyncStats = { matched: number; albumsSkipped: number; tracksUnmatched: number };
 
-// Processa um grupo de scrobbles que já sabemos pertencer ao mesmo álbum
-// (id da MusicBrainz já resolvido): garante que álbum+faixas existem no
-// banco, casa cada escuta com a faixa certa e registra.
+// Processa um grupo de scrobbles que já sabemos pertencer ao mesmo álbum:
+// garante que álbum+faixas existem no banco, casa cada escuta com a faixa
+// certa e registra. Recebe os dados já resolvidos (quando disponíveis) pra
+// não precisar buscar de novo na MusicBrainz — cada chamada extra é mais
+// uma chance de bater no rate limit quando processando um lote grande.
 async function processAlbumGroup(
   supabase: any,
-  albumMbid: string,
-  artistNameHint: string,
+  resolved: { id: string } & Partial<ResolvedAlbum>,
   scrobbles: LastfmScrobble[],
   stats: SyncStats
 ) {
   const album = await ensureAlbumExists(supabase, {
-    musicbrainzReleaseGroupId: albumMbid,
-    artistName: artistNameHint,
+    musicbrainzReleaseGroupId: resolved.id,
+    title: resolved.title,
+    artistName: resolved.artistName,
+    artistMusicbrainzId: resolved.artistId,
+    coverUrl: resolved.coverUrl,
+    year: resolved.year,
   });
   if (!album) {
     stats.albumsSkipped++;
     return;
   }
 
-  const mbTracks: MBTrack[] = await getAlbumTracklist(albumMbid);
+  await sleep(400);
+  const mbTracks: MBTrack[] = await getAlbumTracklist(resolved.id);
   if (mbTracks.length === 0) {
     stats.albumsSkipped++;
     return;
@@ -129,7 +143,11 @@ export async function POST() {
     ? Math.floor(new Date(profile.lastfm_last_synced_at).getTime() / 1000)
     : undefined;
 
-  const allScrobbles = await getRecentScrobbles(profile.lastfm_username, since);
+  // Limita o lote — sincronizações muito grandes (primeira vez, anos de
+  // histórico) estourariam o tempo de execução da rota antes de terminar.
+  // Quem tiver mais scrobbles novos que isso só processa os mais recentes
+  // dessa vez; o resto entra na próxima sincronização (clica de novo).
+  const allScrobbles = await getRecentScrobbles(profile.lastfm_username, since, 40);
   const scrobbles = allScrobbles.filter((s) => !s.nowPlaying && s.scrobbledAt && s.artistName);
 
   if (scrobbles.length === 0) {
@@ -156,16 +174,18 @@ export async function POST() {
   }
 
   for (const group of byAlbumKey.values()) {
-    const albumMbid =
-      group.scrobbles.find((s) => s.albumMbid)?.albumMbid ??
-      (await findAlbumByArtistAndTitle(group.artistName, group.albumName));
+    const directMbid = group.scrobbles.find((s) => s.albumMbid)?.albumMbid;
+    const resolved: ({ id: string } & Partial<ResolvedAlbum>) | null = directMbid
+      ? { id: directMbid, artistName: group.artistName }
+      : await findAlbumByArtistAndTitle(group.artistName, group.albumName);
 
-    if (!albumMbid) {
+    if (!resolved) {
       stats.albumsSkipped++;
       continue;
     }
-    await processAlbumGroup(supabase, albumMbid, group.artistName, group.scrobbles, stats);
-    await new Promise((r) => setTimeout(r, 250)); // não estourar rate limit da MusicBrainz
+    await sleep(500);
+    await processAlbumGroup(supabase, resolved, group.scrobbles, stats);
+    await sleep(500); // pausa entre álbuns pra respeitar o rate limit da MusicBrainz
   }
 
   // --- Caminho 2: scrobbles sem álbum — busca pelo nome da música ---
@@ -179,13 +199,14 @@ export async function POST() {
   }
 
   for (const group of byTrackKey.values()) {
-    const albumMbid = await findAlbumByArtistAndTrack(group.artistName, group.trackName);
-    if (!albumMbid) {
+    const resolved = await findAlbumByArtistAndTrack(group.artistName, group.trackName);
+    if (!resolved) {
       stats.albumsSkipped++;
       continue;
     }
-    await processAlbumGroup(supabase, albumMbid, group.artistName, group.scrobbles, stats);
-    await new Promise((r) => setTimeout(r, 250));
+    await sleep(500);
+    await processAlbumGroup(supabase, resolved, group.scrobbles, stats);
+    await sleep(500);
   }
 
   if (maxScrobbledAt > 0) {
