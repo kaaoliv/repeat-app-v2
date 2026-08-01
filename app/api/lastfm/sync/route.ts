@@ -8,8 +8,33 @@ import {
 } from "@/lib/musicbrainz";
 import { getRecentScrobbles, type LastfmScrobble } from "@/lib/lastfm";
 
+// Remove sufixos comuns que fazem o mesmo título "parecer" diferente entre
+// Last.fm e MusicBrainz: "(feat. Fulano)", "- Remastered 2011", "(Live)" etc.
 function normalizeTitle(title: string) {
-  return title.toLowerCase().trim().replace(/\s+/g, " ");
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/\s*[\(\[][^)\]]*(feat\.?|with|remaster|live|version|edit|mono|stereo)[^)\]]*[\)\]]\s*/gi, " ")
+    .replace(/\s*-\s*(remaster(ed)?|live|mono|stereo).*/i, "")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findBestTrackMatch(
+  scrobbleTitle: string,
+  tracks: { id: string; title: string }[]
+) {
+  const normalizedScrobble = normalizeTitle(scrobbleTitle);
+  // 1. match exato (normalizado)
+  let match = tracks.find((t) => normalizeTitle(t.title) === normalizedScrobble);
+  if (match) return match;
+  // 2. um começa com o outro (cobre "Song" vs "Song (Bonus Track)")
+  match = tracks.find((t) => {
+    const nt = normalizeTitle(t.title);
+    return nt.startsWith(normalizedScrobble) || normalizedScrobble.startsWith(nt);
+  });
+  return match ?? null;
 }
 
 export async function POST() {
@@ -34,19 +59,19 @@ export async function POST() {
     ? Math.floor(new Date(profile.lastfm_last_synced_at).getTime() / 1000)
     : undefined;
 
-  const scrobbles = (await getRecentScrobbles(profile.lastfm_username, since)).filter(
-    (s) => !s.nowPlaying && s.scrobbledAt
-  );
+  const allScrobbles = await getRecentScrobbles(profile.lastfm_username, since);
+  const scrobbles = allScrobbles.filter((s) => !s.nowPlaying && s.scrobbledAt);
+  const withoutAlbum = scrobbles.filter((s) => !s.albumName || !s.artistName).length;
 
   if (scrobbles.length === 0) {
-    return NextResponse.json({ synced: 0, matched: 0 });
+    return NextResponse.json({ synced: 0, matched: 0, albumsSkipped: 0, tracksUnmatched: 0, withoutAlbum: 0 });
   }
 
   // Agrupa por álbum (artista + nome do álbum) pra resolver cada um só
   // uma vez, mesmo que tenha várias faixas/escutas daquele álbum no lote.
   const byAlbumKey = new Map<string, { artistName: string; albumName: string; scrobbles: LastfmScrobble[] }>();
   for (const s of scrobbles) {
-    if (!s.albumName || !s.artistName) continue; // sem álbum não dá pra registrar
+    if (!s.albumName || !s.artistName) continue; // sem álbum não dá pra registrar (ver withoutAlbum)
     const key = `${s.artistName.toLowerCase()}::${s.albumName.toLowerCase()}`;
     if (!byAlbumKey.has(key)) {
       byAlbumKey.set(key, { artistName: s.artistName, albumName: s.albumName, scrobbles: [] });
@@ -55,6 +80,8 @@ export async function POST() {
   }
 
   let matchedCount = 0;
+  let albumsSkipped = 0;
+  let tracksUnmatched = 0;
   let maxScrobbledAt = since ?? 0;
 
   for (const group of byAlbumKey.values()) {
@@ -68,16 +95,25 @@ export async function POST() {
       group.scrobbles.find((s) => s.albumMbid)?.albumMbid ??
       (await findAlbumByArtistAndTitle(group.artistName, group.albumName));
 
-    if (!albumMbid) continue; // não achou com confiança suficiente, pula
+    if (!albumMbid) {
+      albumsSkipped++;
+      continue;
+    }
 
     const album = await ensureAlbumExists(supabase, {
       musicbrainzReleaseGroupId: albumMbid,
       artistName: group.artistName,
     });
-    if (!album) continue;
+    if (!album) {
+      albumsSkipped++;
+      continue;
+    }
 
-    let mbTracks: MBTrack[] = await getAlbumTracklist(albumMbid);
-    if (mbTracks.length === 0) continue;
+    const mbTracks: MBTrack[] = await getAlbumTracklist(albumMbid);
+    if (mbTracks.length === 0) {
+      albumsSkipped++;
+      continue;
+    }
 
     const { data: dbTracks } = await supabase
       .from("tracks")
@@ -94,14 +130,20 @@ export async function POST() {
       )
       .select("id, title");
 
-    if (!dbTracks) continue;
+    if (!dbTracks) {
+      albumsSkipped++;
+      continue;
+    }
 
-    // Casa cada escuta com a faixa certa pelo título (normalizado).
+    // Casa cada escuta com a faixa certa pelo título (com tolerância a
+    // diferenças de "(feat. ...)", remaster, maiúsculas, pontuação etc).
     const countByTrackId = new Map<string, { count: number; latest: number }>();
     for (const s of group.scrobbles) {
-      const normalizedScrobble = normalizeTitle(s.trackName);
-      const track = dbTracks.find((t) => normalizeTitle(t.title) === normalizedScrobble);
-      if (!track) continue;
+      const track = findBestTrackMatch(s.trackName, dbTracks);
+      if (!track) {
+        tracksUnmatched++;
+        continue;
+      }
       const existing = countByTrackId.get(track.id) ?? { count: 0, latest: 0 };
       existing.count += 1;
       if (s.scrobbledAt && s.scrobbledAt > existing.latest) existing.latest = s.scrobbledAt;
@@ -117,12 +159,23 @@ export async function POST() {
       });
       matchedCount += count;
     }
+
+    // pequena pausa entre álbuns pra não estourar o rate limit da MusicBrainz
+    await new Promise((r) => setTimeout(r, 250));
   }
 
-  await supabase
-    .from("profiles")
-    .update({ lastfm_last_synced_at: new Date(maxScrobbledAt * 1000).toISOString() })
-    .eq("id", user.id);
+  if (maxScrobbledAt > 0) {
+    await supabase
+      .from("profiles")
+      .update({ lastfm_last_synced_at: new Date(maxScrobbledAt * 1000).toISOString() })
+      .eq("id", user.id);
+  }
 
-  return NextResponse.json({ synced: scrobbles.length, matched: matchedCount });
+  return NextResponse.json({
+    synced: scrobbles.length,
+    matched: matchedCount,
+    albumsSkipped,
+    tracksUnmatched,
+    withoutAlbum,
+  });
 }
