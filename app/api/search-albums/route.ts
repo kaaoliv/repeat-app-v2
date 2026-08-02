@@ -26,31 +26,37 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [freeTextResults, artists] = await Promise.all([
-      searchAlbumsAndSongs(q),
-      searchArtists(q).catch(() => []),
-    ]);
+    // Dispara as duas buscas principais ao mesmo tempo, mas sem esperar
+    // as duas terminarem antes de seguir — assim que soubermos o artista
+    // (searchArtists), já disparamos a busca de álbuns oficiais dele em
+    // paralelo com o que ainda falta da busca livre, em vez de empilhar
+    // uma chamada inteira depois da outra.
+    const freeTextPromise = searchAlbumsAndSongs(q);
+    const artists = await searchArtists(q).catch(() => []);
+
+    const topArtist = artists[0];
+    const officialAlbumsPromise =
+      topArtist && topArtist.score >= 90 ? getArtistAlbums(topArtist.id) : Promise.resolve([]);
+
+    const [freeTextResults, albums] = await Promise.all([freeTextPromise, officialAlbumsPromise]);
 
     // Quando a busca claramente bate com um artista, os álbuns oficiais
     // dele (discografia real, sem remix/cover/bootleg de terceiros) vão
     // pro topo — é uma fonte bem mais limpa que a busca livre por texto,
     // que mistura qualquer coisa que mencione o nome do artista.
-    let officialResults: MBRelease[] = [];
-    const topArtist = artists[0];
-    if (topArtist && topArtist.score >= 90) {
-      const albums = await getArtistAlbums(topArtist.id);
-      officialResults = albums.slice(0, 8).map((a) => ({
-        id: a.id,
-        title: a.title,
-        artistName: topArtist.name,
-        artistId: topArtist.id,
-        year: a.year,
-        durationSeconds: null,
-        coverUrl: a.coverUrl,
-        matchedTrack: null,
-        score: 1000, // sempre acima dos resultados de texto livre
-      }));
-    }
+    const officialResults: MBRelease[] = topArtist
+      ? albums.slice(0, 8).map((a) => ({
+          id: a.id,
+          title: a.title,
+          artistName: topArtist.name,
+          artistId: topArtist.id,
+          year: a.year,
+          durationSeconds: null,
+          coverUrl: a.coverUrl,
+          matchedTrack: null,
+          score: 1000, // sempre acima dos resultados de texto livre
+        }))
+      : [];
 
     // Deduplica (prioriza a versão "oficial" quando o mesmo álbum aparece
     // nos dois lugares) e ordena por score.

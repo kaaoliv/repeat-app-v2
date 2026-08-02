@@ -5,7 +5,6 @@ import {
   getAlbumBasicInfo,
   getAlbumTracklist,
   getAlbumGenres,
-  getArtistDescription,
 } from "@/lib/musicbrainz";
 
 export async function GET(
@@ -37,12 +36,10 @@ export async function GET(
     return NextResponse.json({ error: "Álbum não encontrado." }, { status: 404 });
   }
 
-  // Descrição do artista pode demorar um pouco mais (cadeia MusicBrainz →
-  // Wikidata → Wikipedia) — busca depois de já ter o básico, sem travar
-  // se falhar.
-  const description = await getArtistDescription(basicInfo.artistId).catch(
-    () => null
-  );
+  // Descrição do artista foi movida pra uma rota separada
+  // (/api/album/[id]/description) — é a parte mais lenta (3 serviços
+  // externos em sequência), então a tela de álbum busca em segundo plano
+  // em vez de segurar a resposta principal.
 
   // Garante que álbum + artista existem no nosso banco, e sincroniza as
   // faixas (cria as que ainda não existem).
@@ -148,7 +145,6 @@ export async function GET(
       genres,
       totalSeconds,
     },
-    description,
     tracks,
     isLoggedIn: !!user,
     inWatchlist,

@@ -25,7 +25,6 @@ type AlbumData = {
     genres: string[];
     totalSeconds: number;
   };
-  description: { text: string; wikipediaUrl: string } | null;
   tracks: Track[];
   isLoggedIn: boolean;
   inWatchlist: boolean;
@@ -41,6 +40,7 @@ export default function AlbumPage({
   const { id } = usePromise(params);
   const router = useRouter();
   const [data, setData] = useState<AlbumData | null>(null);
+  const [description, setDescription] = useState<{ text: string; wikipediaUrl: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyTrackId, setBusyTrackId] = useState<string | null>(null);
@@ -122,6 +122,14 @@ export default function AlbumPage({
       })
       .catch(() => setError("Erro ao carregar álbum."))
       .finally(() => setLoading(false));
+
+    // Busca em paralelo, sem travar a exibição da capa/faixas — é a parte
+    // mais lenta (passa por 3 serviços externos em sequência do lado do
+    // servidor), então chega depois e só complementa a tela quando pronta.
+    fetch(`/api/album/${id}/description`)
+      .then((res) => res.json())
+      .then((json) => setDescription(json.description ?? null))
+      .catch(() => {});
   }, [id]);
 
   async function changePlayCount(track: Track, action: "increment" | "decrement") {
@@ -333,12 +341,12 @@ export default function AlbumPage({
         </div>
       </div>
 
-      {data.description && data.description.text && (
+      {description && description.text && (
         <p className="mt-6 rounded-xl border border-line bg-surface p-4 text-sm leading-relaxed text-ink-muted">
-          {data.description.text}{" "}
-          {data.description.wikipediaUrl && (
+          {description.text}{" "}
+          {description.wikipediaUrl && (
             <a
-              href={data.description.wikipediaUrl}
+              href={description.wikipediaUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary-soft underline hover:text-primary"
