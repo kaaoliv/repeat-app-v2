@@ -19,6 +19,13 @@ export async function GET(
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Álbuns que vieram só do Last.fm (a MusicBrainz não tem esse conteúdo
+  // catalogado) usam uma chave sintética "lastfm:album:..." em vez de um
+  // id de verdade — não faz sentido tentar buscar isso na MusicBrainz.
+  if (releaseGroupId.startsWith("lastfm:")) {
+    return handleLastfmSourcedAlbum(supabase, releaseGroupId, user);
+  }
+
   // Busca tudo em paralelo: info básica, tracklist e gêneros na MusicBrainz.
   const [basicInfo, mbTracks, genres] = await Promise.all([
     getAlbumBasicInfo(releaseGroupId),
@@ -145,5 +152,80 @@ export async function GET(
     tracks,
     isLoggedIn: !!user,
     inWatchlist,
+  });
+}
+
+// Serve um álbum que só existe por causa do Last.fm (a MusicBrainz não
+// cataloga esse conteúdo) — não tenta mais nenhuma chamada externa, usa
+// só o que já está salvo no nosso banco desde a sincronização.
+async function handleLastfmSourcedAlbum(
+  supabase: any,
+  albumKey: string,
+  user: { id: string } | null
+) {
+  const { data: album } = await supabase
+    .from("albums")
+    .select("id, title, cover_url, release_year, duration_seconds, artists(name)")
+    .eq("musicbrainz_id", albumKey)
+    .maybeSingle();
+
+  if (!album) {
+    return NextResponse.json({ error: "Álbum não encontrado." }, { status: 404 });
+  }
+
+  const { data: dbTracks } = await supabase
+    .from("tracks")
+    .select("id, title, duration_seconds, track_number, disc_number")
+    .eq("album_id", album.id)
+    .order("track_number", { ascending: true });
+
+  let playCountByTrackId = new Map<string, number>();
+  if (user && dbTracks && dbTracks.length > 0) {
+    const { data: listens } = await supabase
+      .from("track_listens")
+      .select("track_id, play_count")
+      .eq("user_id", user.id)
+      .in(
+        "track_id",
+        dbTracks.map((t: any) => t.id)
+      );
+    playCountByTrackId = new Map((listens ?? []).map((l: any) => [l.track_id, l.play_count]));
+  }
+
+  const tracks = (dbTracks ?? []).map((t: any) => ({
+    id: t.id,
+    title: t.title,
+    durationSeconds: t.duration_seconds,
+    trackNumber: t.track_number,
+    discNumber: t.disc_number,
+    playCount: playCountByTrackId.get(t.id) ?? 0,
+  }));
+
+  let inWatchlist = false;
+  if (user) {
+    const { data: wl } = await supabase
+      .from("watchlist")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("album_id", album.id)
+      .maybeSingle();
+    inWatchlist = !!wl;
+  }
+
+  return NextResponse.json({
+    album: {
+      title: album.title,
+      artistName: album.artists?.name ?? "Artista desconhecido",
+      artistId: "", // sem id de artista de verdade nesse caso — sem link pra tela de artista
+      coverUrl: album.cover_url,
+      year: album.release_year ? String(album.release_year) : null,
+      genres: [], // gênero só existe via MusicBrainz
+      totalSeconds: album.duration_seconds ?? 0,
+    },
+    description: null, // biografia também só via MusicBrainz/Wikipedia
+    tracks,
+    isLoggedIn: !!user,
+    inWatchlist,
+    source: "lastfm",
   });
 }

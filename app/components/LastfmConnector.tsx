@@ -70,7 +70,8 @@ export default function LastfmConnector({
         json.synced === 0
           ? "Tudo já sincronizado."
           : `${json.matched} escuta(s) registrada(s) de ${json.synced} scrobble(s)` +
-              (json.albumsSkipped > 0 ? ` · ${json.albumsSkipped} álbum(ns) não identificado(s)` : "") +
+              (json.viaLastfm > 0 ? ` · ${json.viaLastfm} via Last.fm direto` : "") +
+              (json.albumsSkipped > 0 ? ` · ${json.albumsSkipped} não identificado(s)` : "") +
               (json.tracksUnmatched > 0 ? ` · ${json.tracksUnmatched} faixa(s) não encontrada(s)` : "")
       );
       setDebugExamples(json.skippedExamples ?? []);

@@ -76,8 +76,15 @@ export async function findAlbumByArtistAndTitle(
   artistName: string,
   albumName: string
 ): Promise<ResolvedAlbum | null> {
+  // A MusicBrainz guarda o release-group sem sufixo de edição na maioria
+  // dos casos ("Believe", não "Believe (Deluxe Edition)") — removendo
+  // isso antes de buscar evita perder matches óbvios.
+  const cleanAlbumName = albumName
+    .replace(/\s*[\(\[](deluxe|expanded|anniversary|remaster(ed)?|special|bonus|collector'?s|super)[^)\]]*[\)\]]\s*/gi, "")
+    .trim();
+
   const escapedArtist = artistName.replace(/["\\]/g, "\\$&");
-  const escapedAlbum = albumName.replace(/["\\]/g, "\\$&");
+  const escapedAlbum = cleanAlbumName.replace(/["\\]/g, "\\$&");
   const query = `artist:"${escapedArtist}" AND releasegroup:"${escapedAlbum}"`;
   const url = `${MB_BASE}/release-group/?query=${encodeURIComponent(
     query
