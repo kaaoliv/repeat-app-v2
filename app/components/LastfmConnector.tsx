@@ -72,7 +72,10 @@ export default function LastfmConnector({
           : `${json.matched} escuta(s) registrada(s) de ${json.synced} scrobble(s)` +
               (json.viaLastfm > 0 ? ` · ${json.viaLastfm} via Last.fm direto` : "") +
               (json.albumsSkipped > 0 ? ` · ${json.albumsSkipped} não identificado(s)` : "") +
-              (json.tracksUnmatched > 0 ? ` · ${json.tracksUnmatched} faixa(s) não encontrada(s)` : "")
+              (json.tracksUnmatched > 0 ? ` · ${json.tracksUnmatched} faixa(s) não encontrada(s)` : "") +
+              (json.remaining > 0
+                ? ` · ainda tem ${json.remaining} pra processar, clica em sincronizar de novo`
+                : "")
       );
       setDebugExamples(json.skippedExamples ?? []);
       router.refresh();

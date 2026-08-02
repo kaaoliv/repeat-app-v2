@@ -17,8 +17,11 @@ import {
 
 // A rota demora (várias chamadas à MusicBrainz/Last.fm, com pausa entre
 // elas pra respeitar rate limit). Sem isso, a Vercel corta em 10s no
-// plano Hobby — pedimos o máximo permitido lá (60s).
+// plano Hobby — pedimos o máximo permitido lá (60s). Trabalhamos com um
+// orçamento de 45s pra sempre ter folga de sobra pra responder antes
+// desse limite, mesmo que não dê tempo de processar o lote inteiro.
 export const maxDuration = 60;
+const TIME_BUDGET_MS = 45_000;
 
 function normalizeTitle(title: string) {
   return title
@@ -31,10 +34,7 @@ function normalizeTitle(title: string) {
     .trim();
 }
 
-function findBestTrackMatch(
-  scrobbleTitle: string,
-  tracks: { id: string; title: string }[]
-) {
+function findBestTrackMatch(scrobbleTitle: string, tracks: { id: string; title: string }[]) {
   const normalizedScrobble = normalizeTitle(scrobbleTitle);
   let match = tracks.find((t) => normalizeTitle(t.title) === normalizedScrobble);
   if (match) return match;
@@ -53,10 +53,18 @@ type SyncStats = {
   tracksUnmatched: number;
   viaLastfm: number;
   skippedExamples: string[];
+  timedOut: boolean;
 };
 
-// Garante que o álbum existe no banco e devolve suas faixas — tenta
-// MusicBrainz primeiro (id já resolvido) e cai pro Last.fm só se preciso.
+type WorkItem = {
+  type: "album" | "track";
+  artistName: string;
+  albumName?: string;
+  trackName?: string;
+  scrobbles: LastfmScrobble[];
+  minScrobbledAt: number;
+};
+
 async function resolveAlbumTracks(
   supabase: any,
   resolved: { id: string } & Partial<ResolvedAlbum>
@@ -71,7 +79,7 @@ async function resolveAlbumTracks(
   });
   if (!album) return null;
 
-  await sleep(400);
+  await sleep(350);
   const mbTracks: MBTrack[] = await getAlbumTracklist(resolved.id);
   if (mbTracks.length === 0) return null;
 
@@ -94,8 +102,6 @@ async function resolveAlbumTracks(
   return { albumId: album.id, dbTracks };
 }
 
-// Registra as escutas de um grupo já resolvido (álbum + faixas conhecidas),
-// não importa se veio da MusicBrainz ou do Last.fm.
 async function registerListens(
   supabase: any,
   dbTracks: { id: string; title: string }[],
@@ -126,7 +132,83 @@ async function registerListens(
   }
 }
 
+// Resolve + registra um item de trabalho (álbum ou música), tentando
+// MusicBrainz e caindo pro Last.fm direto se precisar.
+async function processWorkItem(supabase: any, item: WorkItem, stats: SyncStats) {
+  let resolved: ({ id: string } & Partial<ResolvedAlbum>) | null = null;
+
+  if (item.type === "album") {
+    const directMbid = item.scrobbles.find((s) => s.albumMbid)?.albumMbid;
+    resolved = directMbid
+      ? { id: directMbid, artistName: item.artistName }
+      : await findAlbumByArtistAndTitle(item.artistName, item.albumName!);
+  } else {
+    resolved = await findAlbumByArtistAndTrack(item.artistName, item.trackName!);
+  }
+
+  let albumResult: { albumId: string; dbTracks: { id: string; title: string }[] } | null = null;
+
+  if (resolved) {
+    await sleep(400);
+    albumResult = await resolveAlbumTracks(supabase, resolved);
+  }
+
+  if (!albumResult) {
+    await sleep(250);
+    if (item.type === "album") {
+      const lastfmAlbum = await getAlbumInfo(item.artistName, item.albumName!);
+      if (lastfmAlbum) {
+        const album = await ensureLastfmAlbumExists(supabase, {
+          artistName: lastfmAlbum.artistName,
+          albumTitle: lastfmAlbum.title,
+          coverUrl: lastfmAlbum.coverUrl,
+          tracks:
+            lastfmAlbum.tracks.length > 0
+              ? lastfmAlbum.tracks
+              : item.scrobbles.map((s, i) => ({ title: s.trackName, trackNumber: i + 1, durationSeconds: null })),
+        });
+        if (album) {
+          const { data: dbTracks } = await supabase.from("tracks").select("id, title").eq("album_id", album.id);
+          if (dbTracks) {
+            albumResult = { albumId: album.id, dbTracks };
+            stats.viaLastfm++;
+          }
+        }
+      }
+    } else {
+      const lastfmTrack = await getTrackInfo(item.artistName, item.trackName!);
+      if (lastfmTrack) {
+        const album = await ensureLastfmAlbumExists(supabase, {
+          artistName: lastfmTrack.artistName,
+          albumTitle: lastfmTrack.albumName || lastfmTrack.title,
+          coverUrl: null,
+          tracks: [{ title: lastfmTrack.title, trackNumber: 1, durationSeconds: lastfmTrack.durationSeconds }],
+        });
+        if (album) {
+          const { data: dbTracks } = await supabase.from("tracks").select("id, title").eq("album_id", album.id);
+          if (dbTracks) {
+            albumResult = { albumId: album.id, dbTracks };
+            stats.viaLastfm++;
+          }
+        }
+      }
+    }
+  }
+
+  if (!albumResult) {
+    stats.albumsSkipped++;
+    if (stats.skippedExamples.length < 8) {
+      const label = item.type === "album" ? item.albumName : item.trackName;
+      stats.skippedExamples.push(`[${item.type === "album" ? "álbum" : "música"}] ${item.artistName} — ${label}`);
+    }
+    return;
+  }
+
+  await registerListens(supabase, albumResult.dbTracks, item.scrobbles, stats);
+}
+
 export async function POST() {
+  const startTime = Date.now();
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -152,176 +234,75 @@ export async function POST() {
   const scrobbles = allScrobbles.filter((s) => !s.nowPlaying && s.scrobbledAt && s.artistName);
 
   if (scrobbles.length === 0) {
-    return NextResponse.json({ synced: 0, matched: 0, albumsSkipped: 0, tracksUnmatched: 0, viaLastfm: 0 });
+    return NextResponse.json({
+      synced: 0,
+      matched: 0,
+      albumsSkipped: 0,
+      tracksUnmatched: 0,
+      viaLastfm: 0,
+      remaining: 0,
+    });
   }
 
-  const withAlbum = scrobbles.filter((s) => s.albumName);
-  const withoutAlbum = scrobbles.filter((s) => !s.albumName);
-
-  const stats: SyncStats = { matched: 0, albumsSkipped: 0, tracksUnmatched: 0, viaLastfm: 0, skippedExamples: [] };
-  let maxScrobbledAt = since ?? 0;
+  // Agrupa (por álbum quando tem, por música quando não tem) e ordena do
+  // scrobble mais antigo pro mais novo — processamos nessa ordem pra
+  // sempre saber com segurança até onde já avançamos de verdade, mesmo
+  // se o tempo acabar no meio do caminho.
+  const groups = new Map<string, WorkItem>();
   for (const s of scrobbles) {
-    if (s.scrobbledAt && s.scrobbledAt > maxScrobbledAt) maxScrobbledAt = s.scrobbledAt;
+    const isAlbum = !!s.albumName;
+    const key = isAlbum
+      ? `album::${s.artistName.toLowerCase()}::${s.albumName.toLowerCase()}`
+      : `track::${s.artistName.toLowerCase()}::${s.trackName.toLowerCase()}`;
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        type: isAlbum ? "album" : "track",
+        artistName: s.artistName,
+        albumName: isAlbum ? s.albumName : undefined,
+        trackName: !isAlbum ? s.trackName : undefined,
+        scrobbles: [],
+        minScrobbledAt: s.scrobbledAt!,
+      });
+    }
+    const group = groups.get(key)!;
+    group.scrobbles.push(s);
+    if (s.scrobbledAt! < group.minScrobbledAt) group.minScrobbledAt = s.scrobbledAt!;
   }
 
-  // --- Caminho 1: scrobbles que já vêm com álbum informado ---
-  const byAlbumKey = new Map<string, { artistName: string; albumName: string; scrobbles: LastfmScrobble[] }>();
-  for (const s of withAlbum) {
-    const key = `${s.artistName.toLowerCase()}::${s.albumName.toLowerCase()}`;
-    if (!byAlbumKey.has(key)) {
-      byAlbumKey.set(key, { artistName: s.artistName, albumName: s.albumName, scrobbles: [] });
+  const orderedGroups = Array.from(groups.values()).sort((a, b) => a.minScrobbledAt - b.minScrobbledAt);
+
+  const stats: SyncStats = {
+    matched: 0,
+    albumsSkipped: 0,
+    tracksUnmatched: 0,
+    viaLastfm: 0,
+    skippedExamples: [],
+    timedOut: false,
+  };
+
+  let watermark = since ?? 0;
+  let processedGroups = 0;
+
+  for (const group of orderedGroups) {
+    if (Date.now() - startTime > TIME_BUDGET_MS) {
+      stats.timedOut = true;
+      break;
     }
-    byAlbumKey.get(key)!.scrobbles.push(s);
+
+    await processWorkItem(supabase, group, stats);
+    processedGroups++;
+
+    const groupMax = Math.max(...group.scrobbles.map((s) => s.scrobbledAt ?? 0));
+    if (groupMax > watermark) watermark = groupMax;
+
+    await sleep(400);
   }
 
-  for (const group of byAlbumKey.values()) {
-    const directMbid = group.scrobbles.find((s) => s.albumMbid)?.albumMbid;
-    let resolved: ({ id: string } & Partial<ResolvedAlbum>) | null = directMbid
-      ? { id: directMbid, artistName: group.artistName }
-      : await findAlbumByArtistAndTitle(group.artistName, group.albumName);
-
-    let albumResult: { albumId: string; dbTracks: { id: string; title: string }[] } | null = null;
-
-    if (resolved) {
-      await sleep(500);
-      albumResult = await resolveAlbumTracks(supabase, resolved);
-    }
-
-    // Nível 3: MusicBrainz não achou (ou não tinha faixas) — pergunta pro Last.fm.
-    if (!albumResult) {
-      await sleep(300);
-      const lastfmAlbum = await getAlbumInfo(group.artistName, group.albumName);
-      if (lastfmAlbum) {
-        const album = await ensureLastfmAlbumExists(supabase, {
-          artistName: lastfmAlbum.artistName,
-          albumTitle: lastfmAlbum.title,
-          coverUrl: lastfmAlbum.coverUrl,
-          tracks:
-            lastfmAlbum.tracks.length > 0
-              ? lastfmAlbum.tracks
-              : group.scrobbles.map((s, i) => ({
-                  title: s.trackName,
-                  trackNumber: i + 1,
-                  durationSeconds: null,
-                })),
-        });
-        if (album) {
-          const { data: dbTracks } = await supabase
-            .from("tracks")
-            .select("id, title")
-            .eq("album_id", album.id);
-          if (dbTracks) {
-            albumResult = { albumId: album.id, dbTracks };
-            stats.viaLastfm++;
-          }
-        }
-      }
-    }
-
-    if (!albumResult) {
-      stats.albumsSkipped++;
-      if (stats.skippedExamples.length < 8) {
-        stats.skippedExamples.push(`[álbum] ${group.artistName} — ${group.albumName}`);
-      }
-      await sleep(300);
-      continue;
-    }
-
-    await registerListens(supabase, albumResult.dbTracks, group.scrobbles, stats);
-    await sleep(500);
-  }
-
-  // --- Caminho 2: scrobbles sem álbum — busca pelo nome da música ---
-  const byTrackKey = new Map<string, { artistName: string; trackName: string; scrobbles: LastfmScrobble[] }>();
-  for (const s of withoutAlbum) {
-    const key = `${s.artistName.toLowerCase()}::${s.trackName.toLowerCase()}`;
-    if (!byTrackKey.has(key)) {
-      byTrackKey.set(key, { artistName: s.artistName, trackName: s.trackName, scrobbles: [] });
-    }
-    byTrackKey.get(key)!.scrobbles.push(s);
-  }
-
-  for (const group of byTrackKey.values()) {
-    let resolved = await findAlbumByArtistAndTrack(group.artistName, group.trackName);
-    let albumResult: { albumId: string; dbTracks: { id: string; title: string }[] } | null = null;
-
-    if (resolved) {
-      await sleep(500);
-      albumResult = await resolveAlbumTracks(supabase, resolved);
-    }
-
-    if (!albumResult) {
-      await sleep(300);
-      const lastfmTrack = await getTrackInfo(group.artistName, group.trackName);
-      if (lastfmTrack) {
-        if (lastfmTrack.albumName) {
-          // O Last.fm sabe o álbum mesmo sem o scrobble ter informado —
-          // tenta esse caminho antes de criar algo sintético.
-          await sleep(300);
-          const lastfmAlbum = await getAlbumInfo(group.artistName, lastfmTrack.albumName);
-          if (lastfmAlbum) {
-            const album = await ensureLastfmAlbumExists(supabase, {
-              artistName: lastfmAlbum.artistName,
-              albumTitle: lastfmAlbum.title,
-              coverUrl: lastfmAlbum.coverUrl,
-              tracks:
-                lastfmAlbum.tracks.length > 0
-                  ? lastfmAlbum.tracks
-                  : [{ title: group.trackName, trackNumber: 1, durationSeconds: lastfmTrack.durationSeconds }],
-            });
-            if (album) {
-              const { data: dbTracks } = await supabase
-                .from("tracks")
-                .select("id, title")
-                .eq("album_id", album.id);
-              if (dbTracks) {
-                albumResult = { albumId: album.id, dbTracks };
-                stats.viaLastfm++;
-              }
-            }
-          }
-        }
-
-        // Sem álbum nem na fonte nenhuma — cria um "álbum" de uma faixa só,
-        // melhor do que perder a escuta.
-        if (!albumResult) {
-          const album = await ensureLastfmAlbumExists(supabase, {
-            artistName: lastfmTrack.artistName,
-            albumTitle: lastfmTrack.title,
-            coverUrl: null,
-            tracks: [{ title: lastfmTrack.title, trackNumber: 1, durationSeconds: lastfmTrack.durationSeconds }],
-          });
-          if (album) {
-            const { data: dbTracks } = await supabase
-              .from("tracks")
-              .select("id, title")
-              .eq("album_id", album.id);
-            if (dbTracks) {
-              albumResult = { albumId: album.id, dbTracks };
-              stats.viaLastfm++;
-            }
-          }
-        }
-      }
-    }
-
-    if (!albumResult) {
-      stats.albumsSkipped++;
-      if (stats.skippedExamples.length < 8) {
-        stats.skippedExamples.push(`[música] ${group.artistName} — ${group.trackName}`);
-      }
-      await sleep(300);
-      continue;
-    }
-
-    await registerListens(supabase, albumResult.dbTracks, group.scrobbles, stats);
-    await sleep(500);
-  }
-
-  if (maxScrobbledAt > 0) {
+  if (watermark > (since ?? 0)) {
     await supabase
       .from("profiles")
-      .update({ lastfm_last_synced_at: new Date(maxScrobbledAt * 1000).toISOString() })
+      .update({ lastfm_last_synced_at: new Date(watermark * 1000).toISOString() })
       .eq("id", user.id);
   }
 
@@ -332,5 +313,7 @@ export async function POST() {
     tracksUnmatched: stats.tracksUnmatched,
     viaLastfm: stats.viaLastfm,
     skippedExamples: stats.skippedExamples,
+    remaining: orderedGroups.length - processedGroups,
+    timedOut: stats.timedOut,
   });
 }
