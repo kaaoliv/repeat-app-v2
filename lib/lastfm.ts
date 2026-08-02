@@ -121,40 +121,60 @@ export async function verifyLastfmUser(username: string): Promise<boolean> {
 // Busca as escutas recentes de alguém no Last.fm. Por padrão só traz
 // scrobbles depois de `since` (timestamp unix), pra sincronização
 // incremental não reprocessar tudo toda vez.
+// Busca as escutas recentes de alguém no Last.fm. A API devolve do mais
+// recente pro mais antigo — se só pegássemos uma página, qualquer coisa
+// além do limite ficaria pra trás pra sempre (é exatamente o bug que
+// resolvemos aqui: pagina até cobrir tudo desde `since`, ou até um teto
+// de segurança, em vez de confiar numa página só).
 export async function getRecentScrobbles(
   username: string,
   since?: number,
-  limit = 200
+  maxItems = 500
 ): Promise<LastfmScrobble[]> {
   const apiKey = process.env.LASTFM_API_KEY;
   if (!apiKey) return [];
 
-  const params = new URLSearchParams({
-    method: "user.getrecenttracks",
-    user: username,
-    api_key: apiKey,
-    format: "json",
-    limit: String(limit),
-  });
-  if (since) params.set("from", String(since));
+  const perPage = 200; // máximo permitido pela API do Last.fm
+  const maxPages = Math.ceil(maxItems / perPage);
+  const all: LastfmScrobble[] = [];
 
-  const res = await fetch(`${LASTFM_BASE}?${params.toString()}`);
-  if (!res.ok) return [];
+  for (let page = 1; page <= maxPages; page++) {
+    const params = new URLSearchParams({
+      method: "user.getrecenttracks",
+      user: username,
+      api_key: apiKey,
+      format: "json",
+      limit: String(perPage),
+      page: String(page),
+    });
+    if (since) params.set("from", String(since));
 
-  const data = await res.json();
-  const tracks = data?.recenttracks?.track;
-  if (!tracks) return [];
+    const res = await fetch(`${LASTFM_BASE}?${params.toString()}`);
+    if (!res.ok) break;
 
-  const list = Array.isArray(tracks) ? tracks : [tracks];
+    const data = await res.json();
+    const tracks = data?.recenttracks?.track;
+    if (!tracks) break;
 
-  return list.map((t: any) => ({
-    artistName: t.artist?.["#text"] ?? t.artist?.name ?? "",
-    artistMbid: t.artist?.mbid || null,
-    albumName: t.album?.["#text"] ?? "",
-    albumMbid: t.album?.mbid || null,
-    trackName: t.name ?? "",
-    trackMbid: t.mbid || null,
-    scrobbledAt: t.date?.uts ? Number(t.date.uts) : null,
-    nowPlaying: t["@attr"]?.nowplaying === "true",
-  }));
+    const list = Array.isArray(tracks) ? tracks : [tracks];
+    if (list.length === 0) break;
+
+    all.push(
+      ...list.map((t: any) => ({
+        artistName: t.artist?.["#text"] ?? t.artist?.name ?? "",
+        artistMbid: t.artist?.mbid || null,
+        albumName: t.album?.["#text"] ?? "",
+        albumMbid: t.album?.mbid || null,
+        trackName: t.name ?? "",
+        trackMbid: t.mbid || null,
+        scrobbledAt: t.date?.uts ? Number(t.date.uts) : null,
+        nowPlaying: t["@attr"]?.nowplaying === "true",
+      }))
+    );
+
+    const totalPages = Number(data?.recenttracks?.["@attr"]?.totalPages ?? 1);
+    if (page >= totalPages || all.length >= maxItems) break;
+  }
+
+  return all.slice(0, maxItems);
 }

@@ -230,7 +230,7 @@ export async function POST() {
     ? Math.floor(new Date(profile.lastfm_last_synced_at).getTime() / 1000)
     : undefined;
 
-  const allScrobbles = await getRecentScrobbles(profile.lastfm_username, since, 40);
+  const allScrobbles = await getRecentScrobbles(profile.lastfm_username, since, 300);
   const scrobbles = allScrobbles.filter((s) => !s.nowPlaying && s.scrobbledAt && s.artistName);
 
   if (scrobbles.length === 0) {
