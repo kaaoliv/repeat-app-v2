@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import AlbumCover from "../components/AlbumCover";
+import UserAvatar from "../components/UserAvatar";
 import PageHeader from "../components/PageHeader";
 
 type PersonResult = {
@@ -69,11 +69,10 @@ export default function PeoplePage() {
                 href={`/u/${person.username}`}
                 className="flex items-center gap-3 bg-surface border border-line rounded-xl p-3 hover:border-white/20 transition-colors"
               >
-                <AlbumCover
+                <UserAvatar
                   src={person.avatar_url}
                   alt={person.username}
                   className="w-10 h-10 shrink-0 rounded-full"
-                  sizes="40px"
                 />
                 <div className="min-w-0">
                   <p className="text-ink truncate">{person.display_name || person.username}</p>

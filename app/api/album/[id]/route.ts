@@ -136,6 +136,7 @@ export async function GET(
   }
 
   return NextResponse.json({
+    albumId: album.id,
     album: {
       title: basicInfo.title,
       artistName: basicInfo.artistName,
@@ -209,6 +210,7 @@ async function handleLastfmSourcedAlbum(
   }
 
   return NextResponse.json({
+    albumId: album.id,
     album: {
       title: album.title,
       artistName: album.artists?.name ?? "Artista desconhecido",
@@ -218,7 +220,6 @@ async function handleLastfmSourcedAlbum(
       genres: [], // gênero só existe via MusicBrainz
       totalSeconds: album.duration_seconds ?? 0,
     },
-    description: null, // biografia também só via MusicBrainz/Wikipedia
     tracks,
     isLoggedIn: !!user,
     inWatchlist,

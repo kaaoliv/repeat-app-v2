@@ -2,6 +2,8 @@ import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import UsernameEditor from "../components/UsernameEditor";
 import LastfmConnector from "../components/LastfmConnector";
+import EditProfileForm from "../components/EditProfileForm";
+import UserAvatar from "../components/UserAvatar";
 import AlbumCover from "../components/AlbumCover";
 import { formatListenDate } from "@/lib/format";
 
@@ -86,6 +88,7 @@ const shortcuts = [
   { href: "/stats", label: "Estatísticas", accent: "text-teal" },
   { href: "/watchlist", label: "Quero ouvir", accent: "text-gold" },
   { href: "/lists", label: "Minhas listas", accent: "text-pink" },
+  { href: "/wrapped", label: "Meu Wrapped", accent: "text-coral" },
 ];
 
 export default async function ProfilePage() {
@@ -117,7 +120,7 @@ export default async function ProfilePage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("username, lastfm_username, lastfm_last_synced_at")
+    .select("username, display_name, avatar_url, lastfm_username, lastfm_last_synced_at")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -168,14 +171,27 @@ export default async function ProfilePage() {
   return (
     <main className="max-w-2xl mx-auto px-4 pt-10 pb-8 animate-fade-in">
       {/* Cabeçalho de identidade */}
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="flex items-start justify-between gap-4 mb-3">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center shrink-0">
-            <span className="font-display font-bold text-lg text-primary-soft">
-              {(profile?.username ?? "?").charAt(0).toUpperCase()}
-            </span>
+          {profile?.avatar_url ? (
+            <UserAvatar
+              src={profile.avatar_url}
+              alt={profile.display_name ?? "avatar"}
+              className="w-12 h-12 rounded-full shrink-0"
+            />
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center shrink-0">
+              <span className="font-display font-bold text-lg text-primary-soft">
+                {(profile?.username ?? "?").charAt(0).toUpperCase()}
+              </span>
+            </div>
+          )}
+          <div>
+            {profile?.display_name && (
+              <p className="font-display font-bold text-ink leading-tight">{profile.display_name}</p>
+            )}
+            <UsernameEditor currentUsername={profile?.username ?? null} />
           </div>
-          <UsernameEditor currentUsername={profile?.username ?? null} />
         </div>
         <Link
           href="/people"
@@ -183,6 +199,13 @@ export default async function ProfilePage() {
         >
           Buscar pessoas
         </Link>
+      </div>
+
+      <div className="mb-6">
+        <EditProfileForm
+          currentDisplayName={profile?.display_name ?? null}
+          currentAvatarUrl={profile?.avatar_url ?? null}
+        />
       </div>
 
       {/* Seguidores */}
@@ -236,7 +259,7 @@ export default async function ProfilePage() {
       </section>
 
       {/* Atalhos */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-10">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-10">
         {shortcuts.map((s) => (
           <Link
             key={s.href}

@@ -1,13 +1,47 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import FollowButton from "@/app/components/FollowButton";
 import AlbumCover from "@/app/components/AlbumCover";
+import UserAvatar from "@/app/components/UserAvatar";
 
 export const dynamic = "force-dynamic";
 
 function formatDuration(totalSeconds: number) {
   const hours = Math.floor(totalSeconds / 3600);
   return hours;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ username: string }>;
+}): Promise<Metadata> {
+  const { username } = await params;
+  const supabase = await createSupabaseServerClient();
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("username, display_name, avatar_url")
+    .eq("username", username)
+    .maybeSingle();
+
+  if (!profile) return { title: "Perfil · Repeat" };
+
+  const name = profile.display_name || `@${profile.username}`;
+  const title = `${name} no Repeat`;
+  const description = `Veja quanto tempo ${name} já passou ouvindo música no Repeat.`;
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      images: profile.avatar_url ? [{ url: profile.avatar_url }] : [],
+    },
+    twitter: { card: "summary", title, description },
+  };
 }
 
 export default async function PublicProfilePage({
@@ -90,11 +124,10 @@ export default async function PublicProfilePage({
     <main className="px-4 pt-9 pb-8">
       <div className="flex items-center justify-between mb-8 gap-3">
         <div className="flex items-center gap-4 min-w-0">
-          <AlbumCover
+          <UserAvatar
             src={profile.avatar_url}
             alt={profile.username}
             className="w-16 h-16 shrink-0 rounded-full"
-            sizes="64px"
           />
           <div className="min-w-0">
             <h1 className="font-display font-extrabold text-2xl text-ink truncate">
