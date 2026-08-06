@@ -45,6 +45,79 @@ export default function AlbumPageClient({ id }: { id: string }) {
   const [myLists, setMyLists] = useState<{ id: string; name: string }[]>([]);
   const [showListPicker, setShowListPicker] = useState(false);
   const [addedToListId, setAddedToListId] = useState<string | null>(null);
+  const [markingAlbum, setMarkingAlbum] = useState(false);
+  const [editingCountId, setEditingCountId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+
+  async function setExactPlayCount(track: Track, newValue: number) {
+    if (!track.id || !data) return;
+    if (!data.isLoggedIn) {
+      setError("Você precisa estar logado pra marcar faixas.");
+      return;
+    }
+    const clamped = Math.max(0, Math.floor(newValue));
+    const previous = track.playCount;
+    setBusyTrackId(track.id);
+    setEditingCountId(null);
+    setData({
+      ...data,
+      tracks: data.tracks.map((t) => (t.id === track.id ? { ...t, playCount: clamped } : t)),
+    });
+    try {
+      const res = await fetch("/api/track-listen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trackId: track.id, action: "set", value: clamped }),
+      });
+      if (!res.ok) throw new Error();
+      router.refresh();
+    } catch {
+      setData((prev) =>
+        prev
+          ? { ...prev, tracks: prev.tracks.map((t) => (t.id === track.id ? { ...t, playCount: previous } : t)) }
+          : prev
+      );
+      setError("Erro ao salvar. Tenta de novo.");
+    } finally {
+      setBusyTrackId(null);
+    }
+  }
+
+  async function markWholeAlbumHeard() {
+    if (!data) return;
+    if (!data.isLoggedIn) {
+      setError("Você precisa estar logado pra marcar faixas.");
+      return;
+    }
+    setMarkingAlbum(true);
+    setError(null);
+
+    const trackIds = data.tracks.filter((t) => t.id).map((t) => t.id as string);
+
+    // Atualização otimista — +1 em todas as faixas na hora.
+    setData((prev) =>
+      prev
+        ? { ...prev, tracks: prev.tracks.map((t) => (t.id ? { ...t, playCount: t.playCount + 1 } : t)) }
+        : prev
+    );
+
+    try {
+      await Promise.all(
+        trackIds.map((trackId) =>
+          fetch("/api/track-listen", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ trackId, action: "increment" }),
+          })
+        )
+      );
+      router.refresh();
+    } catch {
+      setError("Erro ao marcar o álbum. Tenta de novo.");
+    } finally {
+      setMarkingAlbum(false);
+    }
+  }
 
   async function openListPicker() {
     if (!data?.isLoggedIn) {
@@ -222,15 +295,15 @@ export default function AlbumPageClient({ id }: { id: string }) {
 
   return (
     <main className="px-4 pt-8">
-      <Link
-        href="/"
+      <button
+        onClick={() => router.back()}
         className="mb-4 inline-flex items-center gap-1 text-sm text-ink-muted transition-colors hover:text-ink"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="m15 18-6-6 6-6" />
         </svg>
         Voltar
-      </Link>
+      </button>
 
       <div className="flex gap-5">
         <div className="relative shrink-0">
@@ -281,7 +354,20 @@ export default function AlbumPageClient({ id }: { id: string }) {
             </div>
           )}
 
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              onClick={markWholeAlbumHeard}
+              disabled={markingAlbum}
+              className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary-soft transition-colors hover:border-primary/60 disabled:opacity-50"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 18V5l12-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="16" r="3" />
+              </svg>
+              {markingAlbum ? "Marcando..." : "Ouvi o álbum inteiro"}
+            </button>
+
             <button
               onClick={toggleWatchlist}
               disabled={watchlistBusy}
@@ -425,12 +511,34 @@ export default function AlbumPageClient({ id }: { id: string }) {
                     <path d="M5 12h14" />
                   </svg>
                 </button>
-                <span
-                  key={track.playCount}
-                  className="animate-pop w-8 text-center text-sm font-bold tabular-nums text-primary-soft"
-                >
-                  {track.playCount}×
-                </span>
+                {editingCountId === track.id ? (
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    autoFocus
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => setExactPlayCount(track, Number(editValue) || 0)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") setExactPlayCount(track, Number(editValue) || 0);
+                      if (e.key === "Escape") setEditingCountId(null);
+                    }}
+                    className="w-12 rounded-md border border-primary/50 bg-bg text-center text-sm font-bold tabular-nums text-primary-soft outline-none"
+                  />
+                ) : (
+                  <button
+                    key={track.playCount}
+                    onClick={() => {
+                      setEditingCountId(track.id);
+                      setEditValue(String(track.playCount));
+                    }}
+                    title="Clica pra digitar um número exato"
+                    className="animate-pop w-8 text-center text-sm font-bold tabular-nums text-primary-soft"
+                  >
+                    {track.playCount}×
+                  </button>
+                )}
                 <button
                   onClick={() => changePlayCount(track, "increment")}
                   disabled={busyTrackId === track.id}

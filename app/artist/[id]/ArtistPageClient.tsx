@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import AlbumCard from "@/app/components/AlbumCard";
 
 type ArtistData = {
@@ -20,6 +21,7 @@ type ArtistData = {
 const accents = ["primary", "blue", "coral", "teal", "pink", "gold"] as const;
 
 export default function ArtistPageClient({ id }: { id: string }) {
+  const router = useRouter();
   const [data, setData] = useState<ArtistData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,15 +65,15 @@ export default function ArtistPageClient({ id }: { id: string }) {
 
   return (
     <main className="px-4 pt-8">
-      <Link
-        href="/"
+      <button
+        onClick={() => router.back()}
         className="mb-4 inline-flex items-center gap-1 text-sm text-ink-muted transition-colors hover:text-ink"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="m15 18-6-6 6-6" />
         </svg>
         Voltar
-      </Link>
+      </button>
 
       <div className="flex items-center gap-4">
         <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full ring-2 ring-primary/40">

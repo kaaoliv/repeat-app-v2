@@ -12,13 +12,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
   }
 
-  const { trackId, action } = await req.json();
+  const { trackId, action, value } = await req.json();
 
-  if (!trackId || (action !== "increment" && action !== "decrement")) {
+  if (!trackId || !["increment", "decrement", "set"].includes(action)) {
     return NextResponse.json(
-      { error: "trackId e action ('increment' | 'decrement') são obrigatórios." },
+      { error: "trackId e action ('increment' | 'decrement' | 'set') são obrigatórios." },
       { status: 400 }
     );
+  }
+
+  if (action === "set") {
+    const count = Number(value);
+    if (!Number.isFinite(count) || count < 0 || !Number.isInteger(count)) {
+      return NextResponse.json({ error: "value precisa ser um número inteiro ≥ 0." }, { status: 400 });
+    }
+
+    if (count === 0) {
+      const { error } = await supabase
+        .from("track_listens")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("track_id", trackId);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ success: true, playCount: 0 });
+    }
+
+    const { data: upserted, error } = await supabase
+      .from("track_listens")
+      .upsert(
+        { user_id: user.id, track_id: trackId, play_count: count, source: "manual" },
+        { onConflict: "user_id,track_id" }
+      )
+      .select("play_count")
+      .single();
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: true, playCount: upserted.play_count });
   }
 
   const fn = action === "increment" ? "increment_track_listen" : "decrement_track_listen";
