@@ -139,27 +139,71 @@ export default async function ProfilePage() {
 
   const { data: recentListens } = await supabase
     .from("track_listens")
-    .select("listened_at, tracks(title, albums(title, cover_url, musicbrainz_id, artists(name)))")
+    .select(
+      "listened_at, play_count, tracks(title, duration_seconds, albums(title, cover_url, musicbrainz_id, artists(name)))"
+    )
     .eq("user_id", user.id)
-    .order("listened_at", { ascending: false })
-    .limit(30);
+    .order("listened_at", { ascending: false });
 
-  const seenAlbums = new Set<string>();
-  const recentAlbums: any[] = [];
+  // Normaliza pra conseguir juntar a mesma música quando ela existe em
+  // mais de um álbum no nosso banco (ex: veio uma vez via MusicBrainz e
+  // outra vez via Last.fm, ou está no álbum original e numa coletânea) —
+  // sem isso, o total de escutas dessa música ficaria dividido entre as
+  // duas entradas em vez de somado.
+  function normalizeSongKey(artist: string, title: string) {
+    return `${artist}::${title}`
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s*[\(\[][^)\]]*(feat\.?|with|remaster|live|version|edit|mono|stereo)[^)\]]*[\)\]]\s*/gi, " ")
+      .replace(/[^\w\s:]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  const songMap = new Map<
+    string,
+    {
+      title: string;
+      artistName: string;
+      coverUrl: string | null;
+      musicbrainzId: string;
+      totalPlayCount: number;
+      lastListenedAt: string;
+    }
+  >();
+
   for (const listen of recentListens ?? []) {
     const track = listen.tracks as any;
-    const albumTitle = track?.albums?.title;
-    if (!albumTitle || seenAlbums.has(albumTitle)) continue;
-    seenAlbums.add(albumTitle);
-    recentAlbums.push({
-      listened_at: listen.listened_at,
-      title: albumTitle,
-      artistName: track?.albums?.artists?.name,
-      coverUrl: track?.albums?.cover_url,
-      musicbrainzId: track?.albums?.musicbrainz_id,
-    });
-    if (recentAlbums.length >= 10) break;
+    const album = track?.albums;
+    if (!track?.title || !album) continue;
+    const artistName = album.artists?.name ?? "";
+    const key = normalizeSongKey(artistName, track.title);
+
+    const existing = songMap.get(key);
+    if (existing) {
+      existing.totalPlayCount += listen.play_count;
+      // mantém a capa/álbum mais recente como "representante" da música
+      if (listen.listened_at > existing.lastListenedAt) {
+        existing.lastListenedAt = listen.listened_at;
+        existing.coverUrl = album.cover_url;
+        existing.musicbrainzId = album.musicbrainz_id;
+      }
+    } else {
+      songMap.set(key, {
+        title: track.title,
+        artistName,
+        coverUrl: album.cover_url,
+        musicbrainzId: album.musicbrainz_id,
+        totalPlayCount: listen.play_count,
+        lastListenedAt: listen.listened_at,
+      });
+    }
   }
+
+  const recentSongs = Array.from(songMap.values())
+    .sort((a, b) => (a.lastListenedAt < b.lastListenedAt ? 1 : -1))
+    .slice(0, 10);
 
   const { data: allListenDates } = await supabase
     .from("track_listens")
@@ -271,15 +315,15 @@ export default async function ProfilePage() {
         ))}
       </div>
 
-      {/* Últimos ouvidos */}
-      <h2 className="font-display font-semibold text-xl text-ink mb-4">Últimos ouvidos</h2>
-      {recentAlbums.length === 0 ? (
+      {/* Últimas músicas */}
+      <h2 className="font-display font-semibold text-xl text-ink mb-4">Últimas músicas</h2>
+      {recentSongs.length === 0 ? (
         <p className="text-ink-muted text-sm">
-          Nenhum álbum marcado ainda. Vai na busca e marca o primeiro!
+          Nenhuma música marcada ainda. Vai na busca e marca a primeira!
         </p>
       ) : (
         <ul className="space-y-2">
-          {recentAlbums.map((item, i) => (
+          {recentSongs.map((item, i) => (
             <li key={i}>
               <Link
                 href={item.musicbrainzId ? `/album/${item.musicbrainzId}` : "#"}
@@ -295,9 +339,14 @@ export default async function ProfilePage() {
                   <p className="font-medium text-ink truncate">{item.title}</p>
                   <p className="text-sm text-ink-muted truncate">{item.artistName}</p>
                 </div>
-                <span className="text-xs text-ink-faint shrink-0">
-                  {formatListenDate(item.listened_at)}
-                </span>
+                <div className="flex flex-col items-end gap-0.5 shrink-0">
+                  <span className="text-xs font-bold tabular-nums text-primary-soft">
+                    {item.totalPlayCount}×
+                  </span>
+                  <span className="text-xs text-ink-faint">
+                    {formatListenDate(item.lastListenedAt)}
+                  </span>
+                </div>
               </Link>
             </li>
           ))}
