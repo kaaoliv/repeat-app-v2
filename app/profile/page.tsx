@@ -13,10 +13,26 @@ import { formatListenDate } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 function formatDuration(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const days = Math.floor(hours / 24);
-  return { hours, minutes, days };
+  const totalHours = Math.floor(totalSeconds / 3600);
+  const totalMinutes = Math.floor((totalSeconds % 3600) / 60);
+  const totalDays = Math.floor(totalHours / 24);
+
+  const months = Math.floor(totalDays / 30);
+  const days = totalDays % 30;
+  const hours = totalHours % 24;
+
+  return { hours: totalHours, minutes: totalMinutes, days: totalDays, months, daysInMonth: days, hoursInDay: hours };
+}
+
+// "9m 15d 4h" — só mostra as unidades que fazem sentido (não aparece "0m"
+// se ainda não fez nem um mês, etc).
+function formatCompactDuration(totalSeconds: number) {
+  const { months, daysInMonth, hoursInDay, hours, minutes } = formatDuration(totalSeconds);
+
+  if (months > 0) return `${months}m ${daysInMonth}d ${hoursInDay}h`;
+  if (daysInMonth > 0) return `${daysInMonth}d ${hoursInDay}h`;
+  if (hours > 0) return `${hours}h ${minutes}min`;
+  return `${minutes}min`;
 }
 
 // Calcula quantos dias seguidos (contando hoje ou ontem como início) a
@@ -46,41 +62,6 @@ function calculateStreak(listenDates: string[]): number {
     else break;
   }
   return streak;
-}
-
-// O contador de horas: cada dígito na sua própria janelinha, estilo
-// odômetro. Mantido, mas repaginado pro tema escuro/violeta.
-function OdometerDigits({
-  value,
-  digits = 4,
-  size = "large",
-}: {
-  value: number;
-  digits?: number;
-  size?: "large" | "small";
-}) {
-  const padded = Math.min(value, 10 ** digits - 1)
-    .toString()
-    .padStart(digits, "0")
-    .split("");
-
-  const boxClass =
-    size === "large"
-      ? "w-12 h-16 sm:w-16 sm:h-20 text-4xl sm:text-5xl"
-      : "w-9 h-12 sm:w-11 sm:h-14 text-2xl sm:text-3xl";
-
-  return (
-    <div className="flex gap-1.5 justify-center">
-      {padded.map((digit, i) => (
-        <span
-          key={i}
-          className={`${boxClass} bg-bg border border-white/10 rounded-lg flex items-center justify-center shadow-[inset_0_2px_10px_rgba(0,0,0,0.7)]`}
-        >
-          <span className="font-display font-bold text-ink tabular-nums">{digit}</span>
-        </span>
-      ))}
-    </div>
-  );
 }
 
 const shortcuts = [
@@ -135,7 +116,6 @@ export default async function ProfilePage() {
     .eq("follower_id", user.id);
 
   const totalSeconds = totals?.total_seconds ?? 0;
-  const { hours, minutes, days } = formatDuration(totalSeconds);
 
   const { data: recentListens } = await supabase
     .from("track_listens")
@@ -270,32 +250,19 @@ export default async function ProfilePage() {
       </div>
 
       {/* Hero de horas */}
-      <section className="relative mb-8 overflow-hidden bg-surface border border-line rounded-2xl p-8 sm:p-10 shadow-card">
+      <section className="relative mb-8 overflow-hidden bg-surface border border-line rounded-2xl p-6 shadow-card">
         <div className="absolute -top-16 -right-10 w-48 h-48 rounded-full bg-primary/20 blur-3xl" aria-hidden />
-        <p className="relative text-ink-muted text-xs uppercase tracking-[0.25em] text-center mb-6">
-          Horas ouvidas
-        </p>
-        <div className="relative">
-          {days > 0 ? (
-            <OdometerDigits value={hours} />
-          ) : (
-            <div className="flex items-end justify-center gap-2">
-              <OdometerDigits value={hours} digits={2} size="small" />
-              <span className="text-ink-muted text-xl font-display font-bold mb-2.5">h</span>
-              <OdometerDigits value={minutes} digits={2} size="small" />
-              <span className="text-ink-muted text-xl font-display font-bold mb-2.5">m</span>
-            </div>
-          )}
+        <div className="relative flex items-center justify-between mb-3">
+          <p className="text-ink-muted text-sm font-medium">Horas ouvidas</p>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-ink-faint">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
         </div>
-        <p className="relative text-ink-muted text-sm text-center mt-6">
-          {days > 0
-            ? `≈ ${days} dia${days === 1 ? "" : "s"} inteiro${days === 1 ? "" : "s"} da sua vida em música`
-            : totalSeconds > 0
-              ? "seu extrato de vida em música"
-              : "vai ouvindo que o contador gira"}
+        <p className="relative font-display font-extrabold text-4xl sm:text-5xl text-ink tracking-tight">
+          {formatCompactDuration(totalSeconds)}
         </p>
         {streak > 0 && (
-          <p className="relative inline-flex items-center gap-1.5 text-gold text-sm mt-4 mx-auto w-full justify-center font-medium">
+          <p className="relative inline-flex items-center gap-1.5 text-gold text-sm mt-4 font-medium">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
             {streak} dia{streak === 1 ? "" : "s"} seguido{streak === 1 ? "" : "s"} ouvindo
           </p>
