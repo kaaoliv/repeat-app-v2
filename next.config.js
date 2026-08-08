@@ -30,6 +30,11 @@ const nextConfig = {
         protocol: "https",
         hostname: "lastfm.freetls.fmcdn.net",
       },
+      {
+        protocol: "https",
+        // Domínio das capas do Spotify (fallback novo).
+        hostname: "i.scdn.co",
+      },
     ],
   },
 };
