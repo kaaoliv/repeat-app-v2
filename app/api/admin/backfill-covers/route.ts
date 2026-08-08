@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase-admin";
 import { getAlbumInfo } from "@/lib/lastfm";
+import { searchAlbumCover } from "@/lib/spotify";
 
 // Rota de manutenção — não roda sozinha, é pra você chamar uma vez (ou de
 // vez em quando) colando a URL no navegador com o secret. Corrige álbuns
@@ -53,6 +54,16 @@ export async function GET(req: NextRequest) {
     const lastfmAlbum = await getAlbumInfo(artistName, album.title).catch(() => null);
     if (lastfmAlbum?.coverUrl) {
       await supabase.from("albums").update({ cover_url: lastfmAlbum.coverUrl }).eq("id", album.id);
+      fixed++;
+      await new Promise((r) => setTimeout(r, 250));
+      continue;
+    }
+
+    // Last.fm não achou (ou devolveu imagem vazia via API mesmo tendo
+    // capa no site) — tenta o Spotify antes de desistir.
+    const spotifyCover = await searchAlbumCover(artistName, album.title).catch(() => null);
+    if (spotifyCover?.coverUrl) {
+      await supabase.from("albums").update({ cover_url: spotifyCover.coverUrl }).eq("id", album.id);
       fixed++;
     } else {
       stillMissing++;
