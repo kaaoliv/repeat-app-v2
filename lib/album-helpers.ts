@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAlbumBasicInfo } from "./musicbrainz";
+import { getAlbumInfo } from "./lastfm";
 
 function slugify(text: string) {
   return text
@@ -8,6 +9,35 @@ function slugify(text: string) {
     .replace(/[\u0300-\u036f]/g, "") // remove acentos
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+// A MusicBrainz sempre devolve uma URL de capa "otimista" (monta o link
+// assumindo que a Cover Art Archive tem a imagem), mas nem sempre tem de
+// verdade — aí a imagem simplesmente não carrega. Confirma se existe de
+// verdade antes de salvar; se não existir, tenta buscar no Last.fm em
+// vez de deixar sem capa nenhuma.
+async function resolveCoverUrl(
+  candidateUrl: string | undefined,
+  artistName: string,
+  albumTitle: string
+): Promise<string | null> {
+  if (candidateUrl) {
+    try {
+      const res = await fetch(candidateUrl, { method: "HEAD" });
+      if (res.ok) return candidateUrl;
+    } catch {
+      // segue pro fallback
+    }
+  }
+
+  try {
+    const lastfmAlbum = await getAlbumInfo(artistName, albumTitle);
+    if (lastfmAlbum?.coverUrl) return lastfmAlbum.coverUrl;
+  } catch {
+    // sem capa mesmo, ok
+  }
+
+  return null;
 }
 
 // Garante que o artista e o álbum existem nas nossas tabelas, criando se
@@ -62,12 +92,14 @@ export async function ensureAlbumExists(
     .maybeSingle();
 
   if (!album) {
+    const verifiedCoverUrl = await resolveCoverUrl(coverUrl, artistName!, title!);
+
     const { data: newAlbum, error: albumErr } = await supabase
       .from("albums")
       .insert({
         artist_id: artist!.id,
         title,
-        cover_url: coverUrl,
+        cover_url: verifiedCoverUrl,
         release_year: year ? Number(year) : null,
         musicbrainz_id: musicbrainzReleaseGroupId,
       })
