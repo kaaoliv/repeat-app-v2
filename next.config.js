@@ -20,6 +20,14 @@ const nextConfig = {
       },
       {
         protocol: "https",
+        // A API do Last.fm às vezes devolve URLs de imagem nesse
+        // subdomínio (com "-img") em vez de "lastfm.freetls.fastly.net".
+        // Sem esse pattern, o next/image bloqueia a imagem mesmo com a
+        // cover_url certinha salva no banco.
+        hostname: "lastfm-img.freetls.fastly.net",
+      },
+      {
+        protocol: "https",
         hostname: "lastfm.freetls.fmcdn.net",
       },
     ],
