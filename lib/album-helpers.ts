@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAlbumBasicInfo } from "./musicbrainz";
 import { getAlbumInfo } from "./lastfm";
+import { searchAlbumCover } from "./spotify";
 
 function slugify(text: string) {
   return text
@@ -14,8 +15,10 @@ function slugify(text: string) {
 // A MusicBrainz sempre devolve uma URL de capa "otimista" (monta o link
 // assumindo que a Cover Art Archive tem a imagem), mas nem sempre tem de
 // verdade — aí a imagem simplesmente não carrega. Confirma se existe de
-// verdade antes de salvar; se não existir, tenta buscar no Last.fm em
-// vez de deixar sem capa nenhuma.
+// verdade antes de salvar; se não existir, tenta Last.fm e depois
+// Spotify em vez de deixar sem capa nenhuma. (O Last.fm às vezes mostra
+// capa no site mas devolve o campo de imagem vazio pela API — por isso
+// o Spotify entra como segunda linha de defesa, não como substituto.)
 async function resolveCoverUrl(
   candidateUrl: string | undefined,
   artistName: string,
@@ -33,6 +36,13 @@ async function resolveCoverUrl(
   try {
     const lastfmAlbum = await getAlbumInfo(artistName, albumTitle);
     if (lastfmAlbum?.coverUrl) return lastfmAlbum.coverUrl;
+  } catch {
+    // segue pro próximo fallback
+  }
+
+  try {
+    const spotifyCover = await searchAlbumCover(artistName, albumTitle);
+    if (spotifyCover?.coverUrl) return spotifyCover.coverUrl;
   } catch {
     // sem capa mesmo, ok
   }
