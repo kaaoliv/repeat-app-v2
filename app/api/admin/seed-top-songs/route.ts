@@ -16,9 +16,9 @@ import { searchAlbumCover } from "@/lib/spotify";
 export const maxDuration = 60;
 const TIME_BUDGET_MS = 50_000;
 
-const LIST_TITLE = "150 Músicas Mais Ouvidas de Todos os Tempos";
+const LIST_TITLE = "110 Músicas Mais Ouvidas de Todos os Tempos";
 const LIST_DESCRIPTION =
-  "As 150 músicas com mais streams de todos os tempos no Spotify (fonte: kworb.net, dados de agosto/2026).";
+  "As 110 músicas com mais streams de todos os tempos no Spotify (fonte: kworb.net, dados de agosto/2026).";
 
 function slugify(text: string) {
   return text
@@ -30,7 +30,7 @@ function slugify(text: string) {
 }
 
 // artista + título, em ordem decrescente de streams.
-const TOP_150: { artist: string; title: string }[] = [
+const TOP_110: { artist: string; title: string }[] = [
   { artist: "The Weeknd", title: "Blinding Lights" },
   { artist: "Ed Sheeran", title: "Shape of You" },
   { artist: "The Neighbourhood", title: "Sweater Weather" },
@@ -141,46 +141,6 @@ const TOP_150: { artist: string; title: string }[] = [
   { artist: "Dua Lipa", title: "Levitating" },
   { artist: "Tears For Fears", title: "Everybody Wants To Rule The World" },
   { artist: "Travis Scott", title: "SICKO MODE" },
-  { artist: "Shakira", title: "Hips Don't Lie" },
-  { artist: "Calvin Harris", title: "We Found Love" },
-  { artist: "Coolio", title: "Gangsta's Paradise" },
-  { artist: "Dua Lipa", title: "New Rules" },
-  { artist: "Teddy Swims", title: "Lose Control" },
-  { artist: "Lukas Graham", title: "7 Years" },
-  { artist: "Shawn Mendes", title: "Stitches" },
-  { artist: "Charlie Puth", title: "Attention" },
-  { artist: "ROSÉ", title: "APT." },
-  { artist: "Halsey", title: "Without Me" },
-  { artist: "Sam Smith", title: "I'm Not The Only One" },
-  { artist: "XXXTENTACION", title: "SAD!" },
-  { artist: "Lil Uzi Vert", title: "XO Tour Llif3" },
-  { artist: "Foster The People", title: "Pumped Up Kicks" },
-  { artist: "Sam Smith", title: "Too Good At Goodbyes" },
-  { artist: "Eminem", title: "Mockingbird" },
-  { artist: "Sam Smith", title: "Stay With Me" },
-  { artist: "Eminem", title: "Till I Collapse" },
-  { artist: "Tame Impala", title: "The Less I Know The Better" },
-  { artist: "Danny Ocean", title: "Me Rehúso" },
-  { artist: "Gotye", title: "Somebody That I Used To Know" },
-  { artist: "Billie Eilish", title: "when the party's over" },
-  { artist: "Bad Bunny", title: "DÁKITI" },
-  { artist: "Taylor Swift", title: "Blank Space" },
-  { artist: "Camila Cabello", title: "Havana" },
-  { artist: "Eminem", title: "The Real Slim Shady" },
-  { artist: "Adele", title: "Easy On Me" },
-  { artist: "Maroon 5", title: "Memories" },
-  { artist: "Zara Larsson", title: "Lush Life" },
-  { artist: "Mariah Carey", title: "All I Want for Christmas Is You" },
-  { artist: "Cigarettes After Sex", title: "Apocalypse" },
-  { artist: "Creedence Clearwater Revival", title: "Have You Ever Seen The Rain" },
-  { artist: "XXXTENTACION", title: "Jocelyn Flores" },
-  { artist: "Jason Mraz", title: "I'm Yours" },
-  { artist: "Lewis Capaldi", title: "Before You Go" },
-  { artist: "Jimin", title: "Who" },
-  { artist: "Gorillaz", title: "Feel Good Inc" },
-  { artist: "Queen", title: "Another One Bites The Dust" },
-  { artist: "Manuel Turizo", title: "La Bachata" },
-  { artist: "Mike Posner", title: "I Took A Pill In Ibiza" },
 ];
 
 async function resolveSongCover(artist: string, title: string): Promise<string | null> {
@@ -277,13 +237,13 @@ export async function GET(req: NextRequest) {
   let timedOut = false;
   const failedSongs: string[] = [];
 
-  for (let i = 0; i < TOP_150.length; i++) {
+  for (let i = 0; i < TOP_110.length; i++) {
     if (Date.now() - startTime > TIME_BUDGET_MS) {
       timedOut = true;
       break;
     }
 
-    const { artist, title } = TOP_150[i];
+    const { artist, title } = TOP_110[i];
     processed++;
 
     const artistKey = `lastfm:artist:${slugify(artist)}`;
@@ -392,7 +352,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     listId: list.id,
-    totalSongs: TOP_150.length,
+    totalSongs: TOP_110.length,
     processed,
     added,
     alreadyInList,
