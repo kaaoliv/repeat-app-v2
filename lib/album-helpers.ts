@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getAlbumBasicInfo } from "./musicbrainz";
-import { getAlbumInfo } from "./lastfm";
+import { getAlbumBasicInfo, getAlbumGenres } from "./musicbrainz";
+import { getAlbumInfo, getArtistGenres } from "./lastfm";
 import { searchAlbumCover } from "./spotify";
 
 function slugify(text: string) {
@@ -103,6 +103,7 @@ export async function ensureAlbumExists(
 
   if (!album) {
     const verifiedCoverUrl = await resolveCoverUrl(coverUrl, artistName!, title!);
+    const genres = await getAlbumGenres(musicbrainzReleaseGroupId).catch(() => []);
 
     const { data: newAlbum, error: albumErr } = await supabase
       .from("albums")
@@ -112,6 +113,7 @@ export async function ensureAlbumExists(
         cover_url: verifiedCoverUrl,
         release_year: year ? Number(year) : null,
         musicbrainz_id: musicbrainzReleaseGroupId,
+        genres: genres.length > 0 ? genres : null,
       })
       .select("id")
       .single();
@@ -134,10 +136,12 @@ export async function ensureLastfmAlbumExists(
     artistName: string;
     albumTitle: string;
     coverUrl: string | null;
+    genres?: string[];
     tracks: { title: string; trackNumber: number; durationSeconds: number | null }[];
   }
 ): Promise<{ id: string } | null> {
   const { artistName, albumTitle, coverUrl, tracks } = params;
+  let genres = params.genres ?? [];
 
   const artistKey = `lastfm:artist:${slugify(artistName)}`;
   const albumKey = `lastfm:album:${slugify(artistName)}:${slugify(albumTitle)}`;
@@ -167,6 +171,12 @@ export async function ensureLastfmAlbumExists(
   const totalSeconds = tracks.reduce((sum, t) => sum + (t.durationSeconds ?? 0), 0);
 
   if (!album) {
+    // Álbum (na prática, muitas vezes é single) sem gênero explícito —
+    // tenta as tags do artista como reforço antes de desistir.
+    if (genres.length === 0) {
+      genres = await getArtistGenres(artistName).catch(() => []);
+    }
+
     const { data: newAlbum, error: albumErr } = await supabase
       .from("albums")
       .insert({
@@ -176,6 +186,7 @@ export async function ensureLastfmAlbumExists(
         musicbrainz_id: albumKey,
         source: "lastfm",
         duration_seconds: totalSeconds || null,
+        genres: genres.length > 0 ? genres : null,
       })
       .select("id")
       .single();

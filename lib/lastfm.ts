@@ -16,8 +16,26 @@ export type LastfmAlbumInfo = {
   artistName: string;
   mbid: string | null;
   coverUrl: string | null;
+  genres: string[];
   tracks: { title: string; trackNumber: number; durationSeconds: number | null }[];
 };
+
+// As "tags" do Last.fm são folksonomia livre (qualquer usuário pode
+// aplicar), então misturam gênero de verdade com humor/vibe ("2020s",
+// "favorite", "sexy"). Filtramos as óbvias não-gênero e pegamos as top 3
+// que sobrarem — não é perfeito, mas cobre a maioria dos casos.
+const NON_GENRE_TAGS = new Set([
+  "favorite", "favorites", "favourite", "favourites", "seen live", "beautiful",
+  "sexy", "awesome", "amazing", "love", "loved", "chill", "cool", "good",
+  "great", "best", "epic", "catchy", "male vocalists", "female vocalists",
+  "under 2000 listeners", "spotify",
+]);
+
+function filterGenreTags(tags: string[]): string[] {
+  return tags
+    .filter((t) => !NON_GENRE_TAGS.has(t.toLowerCase()) && !/^\d{4}s?$/.test(t))
+    .slice(0, 3);
+}
 
 // Última linha de defesa quando a MusicBrainz não acha o álbum de jeito
 // nenhum (comum em funk/DJ brasileiro, covers de fã, etc.) — pega os
@@ -50,17 +68,44 @@ export async function getAlbumInfo(
   const rawTracks = album.tracks?.track;
   const trackList = rawTracks ? (Array.isArray(rawTracks) ? rawTracks : [rawTracks]) : [];
 
+  const rawTags = album.tags?.tag;
+  const tagList = rawTags ? (Array.isArray(rawTags) ? rawTags : [rawTags]) : [];
+  const genres = filterGenreTags(tagList.map((t: any) => t.name).filter(Boolean));
+
   return {
     title: album.name,
     artistName: album.artist,
     mbid: album.mbid || null,
     coverUrl: bestImage?.["#text"] || null,
+    genres,
     tracks: trackList.map((t: any, i: number) => ({
       title: t.name,
       trackNumber: Number(t["@attr"]?.rank ?? i + 1),
       durationSeconds: t.duration ? Number(t.duration) : null,
     })),
   };
+}
+
+// Busca só as tags/gêneros de um artista — usado como último fallback
+// quando o álbum em si não tem tags (comum em singles/faixas avulsas),
+// já que geralmente o artista tem tags mais consistentes.
+export async function getArtistGenres(artistName: string): Promise<string[]> {
+  const apiKey = process.env.LASTFM_API_KEY;
+  if (!apiKey) return [];
+
+  const params = new URLSearchParams({
+    method: "artist.gettoptags",
+    artist: artistName,
+    api_key: apiKey,
+    format: "json",
+  });
+
+  const res = await fetch(`${LASTFM_BASE}?${params.toString()}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  const rawTags = data?.toptags?.tag;
+  const tagList = rawTags ? (Array.isArray(rawTags) ? rawTags : [rawTags]) : [];
+  return filterGenreTags(tagList.map((t: any) => t.name).filter(Boolean));
 }
 
 export type LastfmTrackInfo = {

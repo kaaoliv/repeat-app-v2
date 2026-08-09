@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase-admin";
-import { getAlbumInfo, getTrackInfo } from "@/lib/lastfm";
+import { getAlbumInfo, getTrackInfo, getArtistGenres } from "@/lib/lastfm";
 import { searchAlbumCover } from "@/lib/spotify";
 
 // Rota de manutenção — não roda sozinha, é pra chamar uma vez colando a
@@ -210,6 +210,20 @@ async function resolveSongDuration(artist: string, title: string): Promise<numbe
   }
 }
 
+async function resolveSongGenres(artist: string, title: string): Promise<string[]> {
+  try {
+    const lastfmAlbum = await getAlbumInfo(artist, title);
+    if (lastfmAlbum?.genres && lastfmAlbum.genres.length > 0) return lastfmAlbum.genres;
+  } catch {
+    // segue pro fallback
+  }
+  try {
+    return await getArtistGenres(artist);
+  } catch {
+    return [];
+  }
+}
+
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get("secret");
   if (secret !== process.env.CRON_SECRET) {
@@ -285,9 +299,10 @@ export async function GET(req: NextRequest) {
     let albumId = existingAlbum?.id;
 
     if (!albumId) {
-      const [coverUrl, durationSeconds] = await Promise.all([
+      const [coverUrl, durationSeconds, genres] = await Promise.all([
         resolveSongCover(artist, title),
         resolveSongDuration(artist, title),
+        resolveSongGenres(artist, title),
       ]);
 
       let { data: artistRow } = await supabase
@@ -320,6 +335,7 @@ export async function GET(req: NextRequest) {
           musicbrainz_id: albumKey,
           source: "lastfm",
           duration_seconds: durationSeconds,
+          genres: genres.length > 0 ? genres : null,
         })
         .select("id")
         .single();
