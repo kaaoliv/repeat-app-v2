@@ -1,28 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import type { MBRelease, MBArtist } from "@/lib/musicbrainz";
-import AlbumCover from "./components/AlbumCover";
+import { useEffect, useState } from "react";
 import AlbumCarousel, { type CarouselItem } from "./components/AlbumCarousel";
-import { formatAlbumDuration, formatTrackDuration } from "@/lib/format";
 
 export default function HomePage() {
-  const router = useRouter();
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<MBRelease[]>([]);
-  const [artists, setArtists] = useState<MBArtist[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [loggingId, setLoggingId] = useState<string | null>(null);
-  const [loggedIds, setLoggedIds] = useState<Set<string>>(new Set());
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const fetchingDurations = useRef(new Set<string>());
-
   const [friendsListened, setFriendsListened] = useState<CarouselItem[]>([]);
   const [trending, setTrending] = useState<CarouselItem[]>([]);
   const [newReleases, setNewReleases] = useState<CarouselItem[]>([]);
+  const [popularWeek, setPopularWeek] = useState<CarouselItem[]>([]);
   const [feedLoading, setFeedLoading] = useState(true);
 
   useEffect(() => {
@@ -63,88 +48,36 @@ export default function HomePage() {
       })
       .catch(() => {})
       .finally(() => setFeedLoading(false));
+
+    fetch("/api/discover")
+      .then((res) => res.json())
+      .then((data) => {
+        setPopularWeek(
+          (data.albums ?? []).slice(0, 15).map((a: any) => ({
+            href: `/album/${a.album_id}`,
+            title: a.title,
+            subtitle: a.artist_name,
+            coverUrl: a.cover_url,
+            badge: {
+              color: "gold" as const,
+              label: `${a.total_plays}x essa semana`,
+              corner: "tl" as const,
+            },
+          }))
+        );
+      })
+      .catch(() => {});
   }, []);
 
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (query.trim().length < 2) return;
-
-    setLoading(true);
-    setSearched(true);
-    setFeedback(null);
-    try {
-      const res = await fetch(`/api/search-albums?q=${encodeURIComponent(query)}`);
-      const data = await res.json();
-      const items: MBRelease[] = data.results ?? [];
-      setResults(items);
-      setArtists(data.artists ?? []);
-
-      const missing = items.filter((r) => !r.durationSeconds);
-      fetchDurationsSequentially(missing.map((r) => r.id));
-    } catch {
-      setFeedback("Erro ao buscar. Tenta de novo.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchDurationsSequentially(ids: string[]) {
-    for (const id of ids) {
-      if (fetchingDurations.current.has(id)) continue;
-      fetchingDurations.current.add(id);
-      try {
-        const res = await fetch(`/api/album-duration?id=${id}`);
-        const data = await res.json();
-        if (data.durationSeconds) {
-          setResults((prev) =>
-            prev.map((r) =>
-              r.id === id ? { ...r, durationSeconds: data.durationSeconds } : r
-            )
-          );
-        }
-      } catch {
-        // silencioso
-      }
-      await new Promise((resolve) => setTimeout(resolve, 350));
-    }
-  }
-
-  async function handleMarkAsHeard(album: MBRelease) {
-    setLoggingId(album.id);
-    setFeedback(null);
-    try {
-      const res = await fetch("/api/log-listen", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          musicbrainzReleaseGroupId: album.id,
-          title: album.title,
-          artistName: album.artistName,
-          artistMusicbrainzId: album.artistId,
-          coverUrl: album.coverUrl,
-          year: album.year,
-        }),
-      });
-
-      if (res.status === 401) {
-        setFeedback("Você precisa estar logado pra marcar como ouvido.");
-        return;
-      }
-      const data = await res.json();
-      if (!res.ok) {
-        setFeedback(data.error ?? "Erro ao marcar como ouvido.");
-        return;
-      }
-      setLoggedIds((prev) => new Set(prev).add(album.id));
-      router.refresh();
-    } finally {
-      setLoggingId(null);
-    }
-  }
+  const hasAnyContent =
+    friendsListened.length > 0 ||
+    trending.length > 0 ||
+    newReleases.length > 0 ||
+    popularWeek.length > 0;
 
   return (
-    <main className="px-4">
-      <header className="pb-5 pt-9">
+    <main className="pb-4">
+      <header className="px-4 pb-5 pt-9">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary shadow-glow">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
@@ -162,159 +95,33 @@ export default function HomePage() {
         </p>
       </header>
 
-      <form onSubmit={handleSearch} className="relative mb-6">
-        <svg
-          className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink-faint"
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        >
-          <circle cx="11" cy="11" r="6.5" />
-          <path d="m20 20-3.5-3.5" />
-        </svg>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Busca álbum, artista ou música..."
-          className="w-full rounded-full border border-line bg-surface py-3 pl-11 pr-24 text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-primary/60"
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition-[filter] hover:brightness-110 disabled:opacity-50"
-        >
-          {loading ? "..." : "Buscar"}
-        </button>
-      </form>
-
-      {feedback && (
-        <p className="mb-5 rounded-xl border border-line bg-surface px-4 py-2.5 text-sm text-ink-muted">
-          {feedback}
-        </p>
-      )}
-
-      {!searched && !feedLoading && (
-        <div className="-mx-4">
+      {!feedLoading && (
+        <div>
           <AlbumCarousel title="Amigos ouviram" emoji="👥" items={friendsListened} accent="pink" />
+          <AlbumCarousel
+            title="Populares da semana"
+            emoji="📈"
+            items={popularWeek}
+            accent="gold"
+            seeAllHref="/discover"
+          />
           <AlbumCarousel title="Em alta" emoji="🔥" items={trending} accent="coral" />
           <AlbumCarousel title="Últimos lançamentos" emoji="✨" items={newReleases} accent="teal" />
         </div>
       )}
 
-      {/* Card de artista no topo dos resultados */}
-      {artists.length > 0 && (
-        <section className="mb-6">
-          <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-ink-faint">
-            Artistas
-          </h2>
-          <div className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
-            {artists.map((artist) => (
-              <Link
-                key={artist.id}
-                href={`/artist/${artist.id}`}
-                className="flex shrink-0 items-center gap-2.5 rounded-full border border-line bg-surface py-1.5 pl-1.5 pr-4 transition-colors hover:border-primary/50"
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary to-blue font-display text-sm font-bold text-white">
-                  {artist.name.charAt(0).toUpperCase()}
-                </span>
-                <span className="text-sm font-medium text-ink">{artist.name}</span>
-              </Link>
+      {feedLoading && (
+        <div className="px-4 pt-2">
+          <div className="mb-3 h-5 w-40 animate-pulse rounded bg-surface" />
+          <div className="flex gap-3.5 overflow-hidden">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="aspect-square w-32 shrink-0 animate-pulse rounded-xl bg-surface sm:w-36" />
             ))}
           </div>
-        </section>
+        </div>
       )}
 
-      {/* Grid de resultados como capas de LP */}
-      {results.length > 0 && (
-        <section>
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-ink-faint">
-            Álbuns
-          </h2>
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3">
-            {results.map((album) => {
-              const heard = loggedIds.has(album.id);
-              const dur = formatAlbumDuration(album.durationSeconds);
-              return (
-                <li key={album.id} className="animate-fade-in">
-                  <Link href={`/album/${album.id}`} className="group block">
-                    <div className="relative">
-                      <AlbumCover
-                        src={album.coverUrl}
-                        alt={album.title}
-                        title={album.title}
-                        sizes="(max-width: 640px) 45vw, 200px"
-                        className="aspect-square w-full rounded-xl shadow-card ring-1 ring-line transition-transform duration-200 group-hover:-translate-y-0.5 group-active:scale-[0.97]"
-                      />
-                      <div className="absolute -bottom-0.5 left-3 right-3 h-1 rounded-full bg-primary opacity-90" />
-                      {dur && (
-                        <span className="absolute right-2 top-2 rounded-full bg-bg/70 px-2 py-0.5 text-[11px] font-semibold text-ink shadow-badge backdrop-blur-sm">
-                          {dur}
-                        </span>
-                      )}
-                      {heard && (
-                        <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-teal px-2 py-0.5 text-[11px] font-semibold text-bg shadow-badge">
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="m5 12 4.5 4.5L19 7" />
-                          </svg>
-                          Ouvido
-                        </span>
-                      )}
-                    </div>
-                  </Link>
-                  <div className="mt-2.5 flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-ink">
-                        {album.title}
-                      </p>
-                      <p className="truncate text-xs text-ink-muted">
-                        {album.artistName}
-                        {album.year ? ` · ${album.year}` : ""}
-                      </p>
-                      {album.matchedTrack && (
-                        <p className="mt-0.5 truncate text-[11px] text-ink-faint">
-                          {album.matchedTrack.title}
-                          {album.matchedTrack.durationSeconds
-                            ? ` · ${formatTrackDuration(album.matchedTrack.durationSeconds)}`
-                            : ""}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => handleMarkAsHeard(album)}
-                      disabled={loggingId === album.id || heard}
-                      aria-label={`Marcar ${album.title} como ouvido`}
-                      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-60 ${
-                        heard
-                          ? "border-teal bg-teal/15 text-teal"
-                          : "border-line bg-surface text-ink-muted hover:border-primary/50 hover:text-primary-soft"
-                      }`}
-                    >
-                      {loggingId === album.id ? (
-                        <span className="text-xs">...</span>
-                      ) : heard ? (
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="m5 12 4.5 4.5L19 7" />
-                        </svg>
-                      ) : (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 5v14M5 12h14" />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
-
-      {/* Estado vazio inicial e sem resultados */}
-      {!loading && results.length === 0 && artists.length === 0 && (
+      {!feedLoading && !hasAnyContent && (
         <div className="animate-fade-in flex flex-col items-center px-6 py-12 text-center">
           <div className="mb-5 text-primary">
             <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
@@ -324,12 +131,11 @@ export default function HomePage() {
             </svg>
           </div>
           <h2 className="font-display text-lg font-bold text-ink">
-            {searched ? "Nada encontrado" : "Comece a contar seu tempo"}
+            Comece a contar seu tempo
           </h2>
           <p className="mt-1.5 max-w-xs text-sm leading-relaxed text-ink-muted">
-            {searched
-              ? "Tenta outro nome de álbum, artista ou música."
-              : "Busque um álbum e marque as faixas que você já ouviu. Cada repetição soma no seu extrato de vida em música."}
+            Busca um álbum na aba Buscar e marca as faixas que você já ouviu.
+            Cada repetição soma no seu extrato de vida em música.
           </p>
         </div>
       )}
