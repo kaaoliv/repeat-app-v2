@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getAlbumBasicInfo, getAlbumGenres } from "./musicbrainz";
+import { getAlbumBasicInfo, getAlbumGenres, getAlbumTracklist } from "./musicbrainz";
 import { getAlbumInfo, getArtistGenres } from "./lastfm";
 import { searchAlbumCover } from "./spotify";
 
@@ -210,4 +210,106 @@ export async function ensureLastfmAlbumExists(
   }
 
   return album;
+}
+
+export type ResolvedTrack = {
+  id: string;
+  title: string;
+  musicbrainzRecordingId: string | null;
+};
+
+// Resolve álbum + faixas prontos no banco, não importa se a origem é a
+// MusicBrainz (id de verdade) ou o fallback do Last.fm (id sintético
+// "lastfm:album:..."). Usado tanto por "marcar álbum inteiro" quanto por
+// "marcar só essa faixa" (a busca pode trazer resultado de qualquer uma
+// das duas fontes, e o fluxo de marcação precisa funcionar igual pras
+// duas).
+export async function ensureAlbumAndTracks(
+  supabase: SupabaseClient,
+  params: {
+    id: string;
+    title: string;
+    artistName: string;
+    artistMusicbrainzId?: string;
+    coverUrl?: string | null;
+    year?: string | null;
+    source?: "musicbrainz" | "lastfm";
+  }
+): Promise<{ albumId: string; tracks: ResolvedTrack[] } | null> {
+  const { id, title, artistName, artistMusicbrainzId, coverUrl, year, source } = params;
+  const isLastfm = source === "lastfm" || id.startsWith("lastfm:album:");
+
+  if (isLastfm) {
+    const lastfmAlbum = await getAlbumInfo(artistName, title).catch(() => null);
+
+    const tracks =
+      lastfmAlbum && lastfmAlbum.tracks.length > 0
+        ? lastfmAlbum.tracks
+        : [{ title, trackNumber: 1, durationSeconds: null }];
+
+    const album = await ensureLastfmAlbumExists(supabase, {
+      artistName,
+      albumTitle: title,
+      coverUrl: coverUrl ?? lastfmAlbum?.coverUrl ?? null,
+      genres: lastfmAlbum?.genres,
+      tracks,
+    });
+    if (!album) return null;
+
+    const { data: dbTracks } = await supabase
+      .from("tracks")
+      .select("id, title, musicbrainz_recording_id")
+      .eq("album_id", album.id);
+
+    return {
+      albumId: album.id,
+      tracks: (dbTracks ?? []).map((t) => ({
+        id: t.id,
+        title: t.title,
+        musicbrainzRecordingId: t.musicbrainz_recording_id,
+      })),
+    };
+  }
+
+  const album = await ensureAlbumExists(supabase, {
+    musicbrainzReleaseGroupId: id,
+    title,
+    artistName,
+    artistMusicbrainzId,
+    coverUrl: coverUrl ?? undefined,
+    year,
+  });
+  if (!album) return null;
+
+  const mbTracks = await getAlbumTracklist(id);
+  if (mbTracks.length === 0) return null;
+
+  const totalSeconds = mbTracks.reduce((sum, t) => sum + (t.durationSeconds ?? 0), 0);
+  await supabase.from("albums").update({ duration_seconds: totalSeconds }).eq("id", album.id);
+
+  const { data: dbTracks, error: tracksErr } = await supabase
+    .from("tracks")
+    .upsert(
+      mbTracks.map((t) => ({
+        album_id: album.id,
+        musicbrainz_recording_id: t.recordingId,
+        title: t.title,
+        duration_seconds: t.durationSeconds,
+        track_number: t.trackNumber,
+        disc_number: t.discNumber,
+      })),
+      { onConflict: "album_id,disc_number,track_number" }
+    )
+    .select("id, title, musicbrainz_recording_id");
+
+  if (tracksErr || !dbTracks) return null;
+
+  return {
+    albumId: album.id,
+    tracks: dbTracks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      musicbrainzRecordingId: t.musicbrainz_recording_id,
+    })),
+  };
 }

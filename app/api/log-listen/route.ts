@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
-import { ensureAlbumExists } from "@/lib/album-helpers";
-import { getAlbumTracklist } from "@/lib/musicbrainz";
+import { ensureAlbumAndTracks } from "@/lib/album-helpers";
 
 // Marca TODAS as faixas de um álbum como ouvidas de uma vez — é o botão
 // rápido "Já ouvi" na busca. Pra ajustar faixa por faixa, a pessoa vai na
-// tela do álbum (/album/[id]).
+// tela do álbum (/album/[id]). Funciona tanto pra resultado vindo da
+// MusicBrainz quanto do fallback do Last.fm (ver ensureAlbumAndTracks).
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
 
@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
     artistMusicbrainzId,
     coverUrl,
     year,
+    source,
   } = body;
 
   if (!musicbrainzReleaseGroupId) {
@@ -34,66 +35,30 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const album = await ensureAlbumExists(supabase, {
-    musicbrainzReleaseGroupId,
+  const resolved = await ensureAlbumAndTracks(supabase, {
+    id: musicbrainzReleaseGroupId,
     title,
     artistName,
     artistMusicbrainzId,
     coverUrl,
     year,
+    source,
   });
 
-  if (!album) {
-    return NextResponse.json(
-      { error: "Erro ao salvar álbum." },
-      { status: 500 }
-    );
-  }
-
-  const mbTracks = await getAlbumTracklist(musicbrainzReleaseGroupId);
-
-  if (mbTracks.length === 0) {
+  if (!resolved) {
     return NextResponse.json(
       { error: "Não encontramos as faixas desse álbum ainda." },
       { status: 502 }
     );
   }
 
-  const totalSeconds = mbTracks.reduce(
-    (sum, t) => sum + (t.durationSeconds ?? 0),
-    0
-  );
-  await supabase
-    .from("albums")
-    .update({ duration_seconds: totalSeconds })
-    .eq("id", album.id);
-
-  const { data: dbTracks, error: tracksErr } = await supabase
-    .from("tracks")
-    .upsert(
-      mbTracks.map((t) => ({
-        album_id: album.id,
-        musicbrainz_recording_id: t.recordingId,
-        title: t.title,
-        duration_seconds: t.durationSeconds,
-        track_number: t.trackNumber,
-        disc_number: t.discNumber,
-      })),
-      { onConflict: "album_id,disc_number,track_number" }
-    )
-    .select("id");
-
-  if (tracksErr || !dbTracks) {
-    return NextResponse.json({ error: "Erro ao salvar faixas." }, { status: 500 });
-  }
-
   const { error: listenErr } = await supabase.rpc("bulk_increment_album", {
-    p_album_id: album.id,
+    p_album_id: resolved.albumId,
   });
 
   if (listenErr) {
     return NextResponse.json({ error: listenErr.message }, { status: 500 });
   }
 
-  return NextResponse.json({ success: true, trackCount: dbTracks.length });
+  return NextResponse.json({ success: true, trackCount: resolved.tracks.length });
 }

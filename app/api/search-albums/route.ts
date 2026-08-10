@@ -4,8 +4,11 @@ import {
   searchAlbumsAndSongs,
   searchArtists,
   getArtistAlbums,
+  getArtistDescription,
   type MBRelease,
 } from "@/lib/musicbrainz";
+import { getAlbumInfo, getTrackInfo, searchTracks } from "@/lib/lastfm";
+import { searchAlbumCover } from "@/lib/spotify";
 
 // Cliente simples (sem sessão de usuário) só pra ler dados públicos —
 // a tabela albums é de leitura pública (ver schema.sql), então a anon key
@@ -14,6 +17,63 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL as string,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string
 );
+
+function slugify(text: string) {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Quando a MusicBrainz vem fraca (comum em funk/trap nacional, que ela
+// cataloga mal), completa com busca livre no Last.fm. Cada faixa achada
+// vira um resultado "single" (ou usa o álbum de verdade se o Last.fm
+// souber qual é) com id sintético "lastfm:album:...", no mesmo esquema
+// que já usamos pra sincronização de scrobble.
+async function searchLastfmFallback(
+  query: string,
+  alreadyHave: Set<string>
+): Promise<MBRelease[]> {
+  const matches = await searchTracks(query).catch(() => []);
+  const results: MBRelease[] = [];
+
+  for (const match of matches) {
+    const dedupeKey = `${match.artist.toLowerCase()}|${match.title.toLowerCase()}`;
+    if (alreadyHave.has(dedupeKey)) continue;
+    alreadyHave.add(dedupeKey);
+
+    const [albumInfo, trackInfo, spotifyCover] = await Promise.all([
+      getAlbumInfo(match.artist, match.title).catch(() => null),
+      getTrackInfo(match.artist, match.title).catch(() => null),
+      searchAlbumCover(match.artist, match.title).catch(() => null),
+    ]);
+
+    const albumTitle = albumInfo?.title || match.title;
+    const coverUrl = albumInfo?.coverUrl || spotifyCover?.coverUrl || null;
+    const durationSeconds = trackInfo?.durationSeconds ?? null;
+
+    const syntheticId = `lastfm:album:${slugify(match.artist)}:${slugify(albumTitle)}`;
+
+    results.push({
+      id: syntheticId,
+      title: albumTitle,
+      artistName: match.artist,
+      artistId: "",
+      year: null,
+      durationSeconds: null,
+      coverUrl,
+      matchedTrack: { title: match.title, durationSeconds },
+      score: 60, // abaixo dos resultados reais da MusicBrainz, mas visível
+      source: "lastfm",
+    });
+
+    if (results.length >= 6) break;
+  }
+
+  return results;
+}
 
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q");
@@ -65,7 +125,17 @@ export async function GET(req: NextRequest) {
       const existing = byId.get(item.id);
       if (!existing || item.score > existing.score) byId.set(item.id, item);
     }
-    const results = Array.from(byId.values()).sort((a, b) => b.score - a.score);
+    let results = Array.from(byId.values()).sort((a, b) => b.score - a.score);
+
+    // A MusicBrainz veio fraca — completa com Last.fm. Cobre bem conteúdo
+    // de nicho brasileiro (funk, trap nacional) que ela cataloga mal.
+    if (results.length < 5) {
+      const alreadyHave = new Set(
+        results.map((r) => `${r.artistName.toLowerCase()}|${r.title.toLowerCase()}`)
+      );
+      const lastfmResults = await searchLastfmFallback(q, alreadyHave);
+      results = [...results, ...lastfmResults];
+    }
 
     // Preenche duração de álbum a partir do nosso cache (albums.duration_seconds),
     // pra quem já foi marcado como ouvido antes por alguém. Evita bater na
@@ -85,7 +155,19 @@ export async function GET(req: NextRequest) {
       durationSeconds: r.durationSeconds ?? durationById.get(r.id) ?? null,
     }));
 
-    return NextResponse.json({ results: enriched, artists });
+    // Foto de cada artista (só os retornados pela busca de artista em si,
+    // no máximo 5 — controlado lá em searchArtists). Usa a mesma cadeia
+    // MusicBrainz → Wikidata → Wikipedia da tela de perfil do artista.
+    // Se algum falhar (artista sem página), só fica sem foto — não quebra
+    // a busca.
+    const artistsWithPhoto = await Promise.all(
+      artists.map(async (a) => {
+        const description = await getArtistDescription(a.id).catch(() => null);
+        return { ...a, imageUrl: description?.imageUrl ?? null };
+      })
+    );
+
+    return NextResponse.json({ results: enriched, artists: artistsWithPhoto });
   } catch (err) {
     console.error(err);
     return NextResponse.json(

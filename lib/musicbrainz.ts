@@ -1,3 +1,5 @@
+import { normalizeGenres } from "./genre-taxonomy";
+
 // A MusicBrainz API é gratuita e não exige chave, mas exige um User-Agent
 // identificando a aplicação (é a única regra deles). Ver:
 // https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
@@ -207,11 +209,15 @@ export async function getArtistAlbums(artistId: string): Promise<MBArtistAlbum[]
     primaryType: rg["primary-type"] ?? null,
   }));
 
+  // Ordena só por ano (mais recente primeiro) — sem separar tipo, senão
+  // vira dois blocos cronológicos emendados (todos os "Album" por ano,
+  // depois todos os EP/single por ano), o que lido de cima a baixo não
+  // parece ordenado de verdade. Sem ano vai pro fim.
   return albums.sort((a, b) => {
-    const aIsAlbum = a.primaryType === "Album";
-    const bIsAlbum = b.primaryType === "Album";
-    if (aIsAlbum !== bIsAlbum) return aIsAlbum ? -1 : 1;
-    return (b.year ?? "0").localeCompare(a.year ?? "0");
+    if (!a.year && !b.year) return 0;
+    if (!a.year) return 1;
+    if (!b.year) return -1;
+    return b.year.localeCompare(a.year);
   });
 }
 
@@ -227,6 +233,10 @@ export type MBRelease = {
   // música específica bater com o texto pesquisado (não o nome do álbum).
   matchedTrack: { title: string; durationSeconds: number | null } | null;
   score: number;
+  // Ausente/"musicbrainz" = veio da busca normal. "lastfm" = resultado
+  // de fallback (item que a MusicBrainz não cataloga), o id nesse caso
+  // é uma chave sintética "lastfm:album:..." em vez de um MBID real.
+  source?: "musicbrainz" | "lastfm";
 };
 
 // Busca "release groups" (álbuns) por nome, já trazendo artista + score
@@ -416,10 +426,11 @@ export async function getAlbumGenres(releaseGroupId: string): Promise<string[]> 
   const data = await res.json();
   const genres = (data.genres ?? []) as { name: string; count: number }[];
 
-  return genres
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 3)
-    .map((g) => g.name);
+  return normalizeGenres(
+    genres
+      .sort((a, b) => b.count - a.count)
+      .map((g) => g.name)
+  );
 }
 
 export type ArtistDescription = {

@@ -1,3 +1,5 @@
+import { normalizeGenres } from "./genre-taxonomy";
+
 const LASTFM_BASE = "https://ws.audioscrobbler.com/2.0/";
 
 export type LastfmScrobble = {
@@ -20,22 +22,8 @@ export type LastfmAlbumInfo = {
   tracks: { title: string; trackNumber: number; durationSeconds: number | null }[];
 };
 
-// As "tags" do Last.fm são folksonomia livre (qualquer usuário pode
-// aplicar), então misturam gênero de verdade com humor/vibe ("2020s",
-// "favorite", "sexy"). Filtramos as óbvias não-gênero e pegamos as top 3
-// que sobrarem — não é perfeito, mas cobre a maioria dos casos.
-const NON_GENRE_TAGS = new Set([
-  "favorite", "favorites", "favourite", "favourites", "seen live", "beautiful",
-  "sexy", "awesome", "amazing", "love", "loved", "chill", "cool", "good",
-  "great", "best", "epic", "catchy", "male vocalists", "female vocalists",
-  "under 2000 listeners", "spotify",
-]);
-
-function filterGenreTags(tags: string[]): string[] {
-  return tags
-    .filter((t) => !NON_GENRE_TAGS.has(t.toLowerCase()) && !/^\d{4}s?$/.test(t))
-    .slice(0, 3);
-}
+// A normalização de gênero (allowlist) mora em ./genre-taxonomy —
+// ver esse arquivo pro motivo de não filtrarmos por blocklist aqui.
 
 // Última linha de defesa quando a MusicBrainz não acha o álbum de jeito
 // nenhum (comum em funk/DJ brasileiro, covers de fã, etc.) — pega os
@@ -70,7 +58,7 @@ export async function getAlbumInfo(
 
   const rawTags = album.tags?.tag;
   const tagList = rawTags ? (Array.isArray(rawTags) ? rawTags : [rawTags]) : [];
-  const genres = filterGenreTags(tagList.map((t: any) => t.name).filter(Boolean));
+  const genres = normalizeGenres(tagList.map((t: any) => t.name).filter(Boolean));
 
   return {
     title: album.name,
@@ -105,7 +93,40 @@ export async function getArtistGenres(artistName: string): Promise<string[]> {
   const data = await res.json();
   const rawTags = data?.toptags?.tag;
   const tagList = rawTags ? (Array.isArray(rawTags) ? rawTags : [rawTags]) : [];
-  return filterGenreTags(tagList.map((t: any) => t.name).filter(Boolean));
+  return normalizeGenres(tagList.map((t: any) => t.name).filter(Boolean));
+}
+
+export type LastfmTrackSearchResult = { artist: string; title: string; listeners: number };
+
+// Busca livre de músicas no Last.fm (não precisa saber artista exato).
+// Usado como fallback quando a busca na MusicBrainz vem fraca — cobre
+// bem conteúdo de nicho brasileiro (funk, trap nacional) que a
+// MusicBrainz não cataloga direito.
+export async function searchTracks(query: string): Promise<LastfmTrackSearchResult[]> {
+  const apiKey = process.env.LASTFM_API_KEY;
+  if (!apiKey) return [];
+
+  const params = new URLSearchParams({
+    method: "track.search",
+    track: query,
+    api_key: apiKey,
+    format: "json",
+    limit: "10",
+  });
+
+  const res = await fetch(`${LASTFM_BASE}?${params.toString()}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  const rawMatches = data?.results?.trackmatches?.track;
+  const matches = rawMatches ? (Array.isArray(rawMatches) ? rawMatches : [rawMatches]) : [];
+
+  return matches
+    .map((t: any) => ({
+      artist: t.artist ?? "",
+      title: t.name ?? "",
+      listeners: Number(t.listeners ?? 0),
+    }))
+    .filter((t: LastfmTrackSearchResult) => t.artist && t.title);
 }
 
 export type LastfmTrackInfo = {
